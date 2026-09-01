@@ -57,6 +57,11 @@ type Payload = {
     forWho?: string[];
     notForWho?: string[];
     agenda?: { time?: string; title: string; text?: string }[];
+    sections?: Array<{
+      eyebrow?: string; title: string; body?: string;
+      items?: Array<{ title?: string; text: string }>;
+      quote?: string; ctaText?: string; variant?: "default" | "muted" | "highlight";
+    }>;
     about?: {
       name?: string; role?: string; bio?: string; photoUrl?: string;
       sectionTitle?: string;
@@ -706,6 +711,34 @@ function LongFormLayout({
       )}
 
       {/* Para quem é */}
+      {(page.sections?.length || 0) > 0 && page.sections!.map((section, i) => {
+        const highlighted = section.variant === "highlight";
+        const sectionBg = highlighted ? `${primary}14` : section.variant === "muted" ? surface : "transparent";
+        return (
+          <section key={i} className="py-16 md:py-24" style={{ background: sectionBg, borderBottom: `1px solid ${border}` }}>
+            <div className="max-w-5xl mx-auto px-6">
+              <div className={section.items?.length ? "max-w-3xl" : "max-w-4xl mx-auto text-center"}>
+                {section.eyebrow && <div className="text-xs font-bold uppercase tracking-[0.2em] mb-4" style={{ color: primary }}>{section.eyebrow}</div>}
+                <h2 className="font-display text-3xl md:text-5xl font-bold leading-tight" style={{ color: text }}>{section.title}</h2>
+                {section.body && <div className="mt-6 text-base md:text-lg leading-relaxed whitespace-pre-line" style={{ color: muted }}>{section.body}</div>}
+              </div>
+              {(section.items?.length || 0) > 0 && (
+                <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4 mt-10">
+                  {section.items!.map((item, itemIndex) => (
+                    <div key={itemIndex} className="rounded-xl p-5" style={{ background: surfaceStrong, border: `1px solid ${border}` }}>
+                      {item.title && <div className="font-bold uppercase tracking-wide mb-2" style={{ color: text }}>{item.title}</div>}
+                      <div className="text-sm leading-relaxed" style={{ color: muted }}>{item.text}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {section.quote && <blockquote className="max-w-4xl mx-auto mt-10 border-l-4 px-6 py-4 text-xl md:text-2xl font-bold text-center" style={{ borderColor: primary, color: text }}>{section.quote}</blockquote>}
+              {section.ctaText && <div className="mt-9 text-center"><CtaBtn label={section.ctaText} /></div>}
+            </div>
+          </section>
+        );
+      })}
+
       {(page.forWho?.length || 0) > 0 && (
         <section className="py-16 md:py-20">
           <div className="max-w-4xl mx-auto px-6">

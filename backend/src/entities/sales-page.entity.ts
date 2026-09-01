@@ -37,6 +37,16 @@ export interface SalesPageAgendaItem {
   text?: string;
 }
 
+export interface SalesPageSection {
+  eyebrow?: string;
+  title: string;
+  body?: string;
+  items?: Array<{ title?: string; text: string }>;
+  quote?: string;
+  ctaText?: string;
+  variant?: 'default' | 'muted' | 'highlight';
+}
+
 export interface SalesPageAbout {
   name?: string;
   role?: string;
@@ -201,6 +211,9 @@ export class SalesPage {
 
   @Column({ type: 'jsonb', default: '[]' })
   agenda: SalesPageAgendaItem[];
+
+  @Column({ type: 'jsonb', default: '[]' })
+  sections: SalesPageSection[];
 
   @Column({ type: 'jsonb', nullable: true })
   about?: SalesPageAbout;

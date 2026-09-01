@@ -11,7 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ImageUploadField } from "@/components/ImageUploadField";
-import { ArrowLeft, Sparkles, Loader2, Save, Plus, Trash2, ExternalLink, Copy, Rocket } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Sparkles, Loader2, Save, Plus, Trash2, ExternalLink, Copy, Rocket } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -19,6 +19,12 @@ type Feature = { icon?: string; title: string; text?: string };
 type Faq = { q: string; a: string };
 type Testimonial = { name: string; role?: string; quote: string; avatarUrl?: string };
 type AgendaItem = { time?: string; title: string; text?: string };
+type PageSection = {
+  eyebrow?: string; title: string; body?: string;
+  items?: Array<{ title?: string; text: string }>;
+  quote?: string; ctaText?: string;
+  variant?: "default" | "muted" | "highlight";
+};
 type Coupon = {
   code: string;
   description?: string;
@@ -74,6 +80,7 @@ type SalesPage = {
   forWho?: string[];
   notForWho?: string[];
   agenda?: AgendaItem[];
+  sections?: PageSection[];
   about?: {
     name?: string;
     role?: string;
@@ -180,6 +187,7 @@ export default function SalesPageEditorPage() {
           forWho: g.forWho || [],
           notForWho: g.notForWho || [],
           agenda: g.agenda || [],
+          sections: g.sections || [],
           about: g.about || page?.about,
           eventInfo: g.eventInfo || page?.eventInfo,
           urgencyText: g.urgencyText || "",
@@ -439,6 +447,41 @@ export default function SalesPageEditorPage() {
         {/* ===== Long form fields ===== */}
         {page.template === "long_form" && (
           <TabsContent value="longform" className="space-y-4">
+            <Card className="p-6 space-y-4">
+              <div className="flex justify-between items-center gap-3 flex-wrap">
+                <div>
+                  <h3 className="font-bold">Blocos da página</h3>
+                  <p className="text-xs text-muted-foreground">A IA cria estes blocos em ordem. Você pode editar, reordenar ou adicionar novos.</p>
+                </div>
+                <Button variant="outline" size="sm" onClick={() => patch({ sections: [...(page.sections || []), { title: "Novo bloco", body: "", items: [], variant: "default" }] })}>
+                  <Plus className="h-4 w-4 mr-1" />Adicionar bloco
+                </Button>
+              </div>
+              {(page.sections || []).map((section, i) => (
+                <div key={i} className="rounded-xl border p-4 space-y-3 bg-muted/10">
+                  <div className="flex justify-between gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Bloco {i + 1}</span>
+                    <div className="flex gap-1">
+                      <Button variant="ghost" size="sm" disabled={i === 0} onClick={() => { const arr = [...(page.sections || [])]; [arr[i - 1], arr[i]] = [arr[i], arr[i - 1]]; patch({ sections: arr }); }}><ArrowUp className="h-4 w-4" /></Button>
+                      <Button variant="ghost" size="sm" disabled={i === (page.sections || []).length - 1} onClick={() => { const arr = [...(page.sections || [])]; [arr[i], arr[i + 1]] = [arr[i + 1], arr[i]]; patch({ sections: arr }); }}><ArrowDown className="h-4 w-4" /></Button>
+                      <Button variant="ghost" size="sm" onClick={() => patch({ sections: (page.sections || []).filter((_, j) => j !== i) })}><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                    </div>
+                  </div>
+                  <div className="grid md:grid-cols-[1fr_180px] gap-3">
+                    <div><Label>Chamada superior</Label><Input value={section.eyebrow || ""} onChange={(e) => { const arr = [...(page.sections || [])]; arr[i] = { ...section, eyebrow: e.target.value }; patch({ sections: arr }); }} placeholder="Ex.: O problema" /></div>
+                    <div><Label>Visual</Label><Select value={section.variant || "default"} onValueChange={(v: PageSection["variant"]) => { const arr = [...(page.sections || [])]; arr[i] = { ...section, variant: v }; patch({ sections: arr }); }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="default">Padrão</SelectItem><SelectItem value="muted">Fundo alternado</SelectItem><SelectItem value="highlight">Destaque</SelectItem></SelectContent></Select></div>
+                  </div>
+                  <div><Label>Título</Label><Input value={section.title} onChange={(e) => { const arr = [...(page.sections || [])]; arr[i] = { ...section, title: e.target.value }; patch({ sections: arr }); }} /></div>
+                  <div><Label>Texto</Label><Textarea rows={4} value={section.body || ""} onChange={(e) => { const arr = [...(page.sections || [])]; arr[i] = { ...section, body: e.target.value }; patch({ sections: arr }); }} placeholder="Separe parágrafos com Enter." /></div>
+                  <div><Label>Itens (um por linha; use Título | descrição)</Label><Textarea rows={4} value={(section.items || []).map((item) => `${item.title ? `${item.title} | ` : ""}${item.text}`).join("\n")} onChange={(e) => { const arr = [...(page.sections || [])]; arr[i] = { ...section, items: e.target.value.split("\n").filter(Boolean).map((line) => { const [title, ...rest] = line.split("|"); return rest.length ? { title: title.trim(), text: rest.join("|").trim() } : { text: title.trim() }; }) }; patch({ sections: arr }); }} /></div>
+                  <div className="grid md:grid-cols-2 gap-3">
+                    <div><Label>Frase de destaque</Label><Input value={section.quote || ""} onChange={(e) => { const arr = [...(page.sections || [])]; arr[i] = { ...section, quote: e.target.value }; patch({ sections: arr }); }} /></div>
+                    <div><Label>CTA deste bloco</Label><Input value={section.ctaText || ""} onChange={(e) => { const arr = [...(page.sections || [])]; arr[i] = { ...section, ctaText: e.target.value }; patch({ sections: arr }); }} /></div>
+                  </div>
+                </div>
+              ))}
+              {(page.sections || []).length === 0 && <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">Nenhum bloco ainda. Gere a página com IA ou adicione manualmente.</p>}
+            </Card>
             <Card className="p-6 space-y-3">
               <h3 className="font-bold">Informações do evento (opcional)</h3>
               <p className="text-xs text-muted-foreground">Aparece em destaque abaixo do hero (para imersões, workshops, eventos).</p>

@@ -84,6 +84,7 @@ export class SalesPagesService {
       forWho: (dto as any).forWho || [],
       notForWho: (dto as any).notForWho || [],
       agenda: (dto as any).agenda || [],
+      sections: (dto as any).sections || [],
       about: (dto as any).about,
       eventInfo: (dto as any).eventInfo,
       urgencyText: (dto as any).urgencyText,
@@ -102,7 +103,7 @@ export class SalesPagesService {
       'guaranteeText', 'ctaText', 'priceCents', 'currency', 'originalPriceCents',
       'maxInstallments', 'paymentMode', 'subscriptionCycle', 'paymentProviderId',
       'theme', 'seo', 'published',
-      'template', 'forWho', 'notForWho', 'agenda', 'about', 'eventInfo', 'urgencyText',
+      'template', 'forWho', 'notForWho', 'agenda', 'sections', 'about', 'eventInfo', 'urgencyText',
       'coupons', 'countdown',
     ];
     for (const k of editable) {
@@ -136,6 +137,7 @@ export class SalesPagesService {
   "forWho": string[] (5 a 7 itens curtos começando com "Você" — para quem O produto É indicado),
   "notForWho": string[] (3 a 4 itens curtos — para quem NÃO é indicado),
   "agenda": [{"time": string, "title": string, "text": string}] (5 a 8 blocos com horário/etapa e descrição curta — se for evento use horários "9h", "10h30" etc; se for curso use "Módulo 1", "Módulo 2"…),
+  "sections": [{"eyebrow": string, "title": string, "body": string, "items": [{"title": string, "text": string}], "quote": string, "ctaText": string, "variant": "default"|"muted"|"highlight"}] (4 a 7 blocos ordenados: dor, mecanismo, aplicações, transformação e oferta; use parágrafos em body, listas em items e CTA quando fizer sentido),
   "about": {"name": string, "role": string, "bio": string} (mentor — se não souber, deixe placeholders coerentes com o briefing),
   "eventInfo": {"date": string, "time": string, "location": string, "extra": string} (só se o briefing indicar evento/imersão presencial; caso contrário deixe strings vazias),
   "urgencyText": string (frase curta de escassez, ex: "Lote 1 esgota em 48h · Vagas limitadas")`;
@@ -217,6 +219,18 @@ Gere o JSON agora.`;
         title: String(a?.title || '').slice(0, 120),
         text: String(a?.text || '').slice(0, 300),
       })) : [],
+      sections: Array.isArray(parsed.sections) ? parsed.sections.slice(0, 10).map((s: any) => ({
+        eyebrow: String(s?.eyebrow || '').slice(0, 80),
+        title: String(s?.title || '').slice(0, 180),
+        body: String(s?.body || '').slice(0, 3000),
+        items: Array.isArray(s?.items) ? s.items.slice(0, 10).map((item: any) => ({
+          title: String(item?.title || '').slice(0, 100),
+          text: String(item?.text || item || '').slice(0, 500),
+        })) : [],
+        quote: String(s?.quote || '').slice(0, 500),
+        ctaText: String(s?.ctaText || '').slice(0, 60),
+        variant: ['default', 'muted', 'highlight'].includes(s?.variant) ? s.variant : 'default',
+      })).filter((s: any) => s.title) : [],
       about: parsed.about && typeof parsed.about === 'object' ? {
         name: String(parsed.about.name || '').slice(0, 100),
         role: String(parsed.about.role || '').slice(0, 120),
