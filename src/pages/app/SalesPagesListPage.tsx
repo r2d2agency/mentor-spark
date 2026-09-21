@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, ExternalLink, Copy, Trash2, Sparkles } from "lucide-react";
+import { Plus, ExternalLink, Copy, Trash2, Sparkles, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -45,6 +45,7 @@ const AI_BUSINESS_TEMPLATE = {
 export default function SalesPagesListPage() {
   const [items, setItems] = useState<SalesPage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [duplicatingId, setDuplicatingId] = useState<string | null>(null);
   const { user } = useAuth();
   const navigate = useNavigate();
 
@@ -92,6 +93,19 @@ export default function SalesPagesListPage() {
       load();
     } catch (e: any) {
       toast.error(e.message);
+    }
+  };
+
+  const duplicate = async (id: string) => {
+    try {
+      setDuplicatingId(id);
+      const copy = await api<SalesPage>(`/sales-pages/${id}/duplicate`, { method: "POST" });
+      toast.success(`Página clonada com o slug "${copy.slug}"`);
+      setItems((current) => [copy, ...current]);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setDuplicatingId(null);
     }
   };
 
@@ -154,8 +168,17 @@ export default function SalesPagesListPage() {
                 </div>
               </div>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => copyUrl(p.slug)}>
+                <Button variant="outline" size="sm" onClick={() => copyUrl(p.slug)} title="Copiar link">
                   <Copy className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => duplicate(p.id)}
+                  disabled={duplicatingId === p.id}
+                  title="Duplicar página"
+                >
+                  {duplicatingId === p.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Copy className="h-4 w-4" />}
                 </Button>
                 {p.published && (
                   <a href={`/p/${user?.slug}/${p.slug}`} target="_blank" rel="noreferrer">

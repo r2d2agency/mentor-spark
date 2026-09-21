@@ -15,6 +15,12 @@ export class SalesPagesController {
   }
 
   @Auth('mentor', 'super_admin', 'mentor_team')
+  @Post(':id/duplicate')
+  duplicate(@TenantId() mentorId: string, @Param('id') id: string) {
+    return this.svc.duplicate(mentorId, id);
+  }
+
+  @Auth('mentor', 'super_admin', 'mentor_team')
   @Get(':id')
   get(@TenantId() mentorId: string, @Param('id') id: string) {
     return this.svc.get(mentorId, id);

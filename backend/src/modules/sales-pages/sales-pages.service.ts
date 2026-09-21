@@ -92,6 +92,52 @@ export class SalesPagesService {
     return this.pages.save(p);
   }
 
+  async duplicate(mentorId: string, id: string) {
+    const source = await this.get(mentorId, id);
+    const slug = await this.ensureUniqueSlug(mentorId, `${source.slug}-copia`);
+
+    const copy = this.pages.create({
+      mentorId,
+      slug,
+      productType: source.productType,
+      productRefId: source.productRefId,
+      title: source.title,
+      headline: source.headline,
+      subheadline: source.subheadline,
+      description: source.description,
+      heroImageUrl: source.heroImageUrl,
+      videoUrl: source.videoUrl,
+      features: structuredClone(source.features || []),
+      faqs: structuredClone(source.faqs || []),
+      testimonials: structuredClone(source.testimonials || []),
+      badges: structuredClone(source.badges || []),
+      guaranteeText: source.guaranteeText,
+      ctaText: source.ctaText,
+      priceCents: source.priceCents,
+      currency: source.currency,
+      originalPriceCents: source.originalPriceCents,
+      maxInstallments: source.maxInstallments,
+      paymentMode: source.paymentMode,
+      subscriptionCycle: source.subscriptionCycle,
+      paymentProviderId: source.paymentProviderId,
+      published: source.published,
+      theme: source.theme ? structuredClone(source.theme) : source.theme,
+      template: source.template,
+      forWho: structuredClone(source.forWho || []),
+      notForWho: structuredClone(source.notForWho || []),
+      agenda: structuredClone(source.agenda || []),
+      sections: structuredClone(source.sections || []),
+      about: source.about ? structuredClone(source.about) : source.about,
+      eventInfo: source.eventInfo ? structuredClone(source.eventInfo) : source.eventInfo,
+      urgencyText: source.urgencyText,
+      countdown: source.countdown ? structuredClone(source.countdown) : source.countdown,
+      coupons: structuredClone(source.coupons || []),
+      seo: source.seo ? structuredClone(source.seo) : source.seo,
+    });
+
+    return this.pages.save(copy);
+  }
+
   async update(mentorId: string, id: string, dto: Partial<SalesPage>) {
     const p = await this.get(mentorId, id);
     if (dto.slug && dto.slug !== p.slug) {
