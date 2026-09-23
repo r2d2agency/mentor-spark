@@ -318,8 +318,9 @@ function Column({
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     const origin = originFilter === "all" ? "todos" : (eventGroups.find((g) => (g.eventId || "none") === originFilter)?.eventName || originFilter);
+    const safeOrigin = origin.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "origem";
     a.href = url;
-    a.download = `leads-${origin}-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `leads-${safeOrigin}-${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(a);
     a.click();
     a.remove();
