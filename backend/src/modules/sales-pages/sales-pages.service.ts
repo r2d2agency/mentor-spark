@@ -8,6 +8,7 @@ import {
 import { User, UserStatus } from '../../entities/user.entity';
 import { MentorPaymentProvider, PaymentProviderType } from '../../entities/mentor-payment-provider.entity';
 import { AiService } from '../ai/ai.service';
+import { LeadsService } from '../leads/leads.service';
 
 function slugify(s: string) {
   return s
@@ -27,6 +28,7 @@ export class SalesPagesService {
     @InjectRepository(User) private users: Repository<User>,
     @InjectRepository(MentorPaymentProvider) private providers: Repository<MentorPaymentProvider>,
     private ai: AiService,
+    private leadsService: LeadsService,
   ) {}
 
   // ==================== CRUD mentor ====================
@@ -535,6 +537,22 @@ Gere o JSON agora.`;
     }
 
     const chargeId = charge.id || charge.installment;
+
+    // Vincula o comprador ao funil de leads (best-effort — nunca quebra o checkout).
+    try {
+      await this.leadsService.createFromCapture({
+        mentorId: mentor.id,
+        mentorBrand: mentor.brandName || mentor.name,
+        name: dto.name,
+        email: dto.email,
+        phone: dto.phone,
+        source: `sales:${page.slug}`,
+        salesPageId: page.id,
+        salesPageSlug: page.slug,
+      });
+    } catch (e: any) {
+      this.logger.warn(`Checkout criou cobrança mas falhou ao vincular lead: ${e?.message}`);
+    }
 
     // Marca uso do cupom (best-effort). Se der erro persistente, seguimos com a cobrança criada.
     if (appliedCoupon) {

@@ -6,11 +6,13 @@ import { MentorPaymentProvider } from '../../entities/mentor-payment-provider.en
 import { SalesPagesController, PublicSalesPagesController } from './sales-pages.controller';
 import { SalesPagesService } from './sales-pages.service';
 import { AiModule } from '../ai/ai.module';
+import { LeadsModule } from '../leads/leads.module';
 
 @Module({
   imports: [
     TypeOrmModule.forFeature([SalesPage, User, MentorPaymentProvider]),
     AiModule,
+    LeadsModule,
   ],
   controllers: [SalesPagesController, PublicSalesPagesController],
   providers: [SalesPagesService],

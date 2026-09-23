@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
    Loader2, Kanban as KanbanIcon, Flame, Snowflake, Cloud, Tag,
-   TrendingUp, Users, Sparkles, Plus, Zap, Filter, List, UserPlus,
+   TrendingUp, Users, Sparkles, Plus, Zap, Filter, List, UserPlus, Download,
 } from "lucide-react";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -19,6 +19,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
+import LeadDetailModal from "@/components/leads/LeadDetailModal";
 import {
   DndContext,
   DragEndEvent,
@@ -40,6 +41,25 @@ interface Lead {
   temperature?: "cold" | "warm" | "hot";
   score?: number;
   createdAt: string;
+  phone?: string;
+  source?: string;
+  eventId?: string | null;
+  eventName?: string | null;
+  salesPageSlug?: string | null;
+}
+
+interface EventGroup {
+  eventId: string | null;
+  eventName: string;
+  slug: string | null;
+  total: number;
+}
+
+function originLabel(lead: Lead) {
+  if (lead.eventName) return lead.eventName;
+  if (lead.salesPageSlug) return `Vendas: ${lead.salesPageSlug}`;
+  if (lead.source) return lead.source;
+  return null;
 }
 
  type FunnelView = "principal" | "hot" | "tested" | "negotiating" | "clients" | "lost" | "list";
@@ -130,6 +150,12 @@ function LeadCard({ lead, onOpen }: { lead: Lead; onOpen: () => void }) {
           {!lead.company && <div className="text-[11px] text-muted-foreground truncate">{lead.email}</div>}
         </div>
       </div>
+      {originLabel(lead) && (
+        <div className="flex items-center gap-1 text-[10px] text-muted-foreground truncate">
+          <Tag className="h-2.5 w-2.5 shrink-0" />
+          <span className="truncate">{originLabel(lead)}</span>
+        </div>
+      )}
       <div className="flex items-center justify-between gap-2 pt-1 border-t border-border/40">
         <div className="flex items-center gap-1.5">
           {tempBadge(lead.temperature)}
@@ -201,6 +227,9 @@ function Column({
    const [availableGroups, setAvailableGroups] = useState<any[]>([]);
    const [loadingGroups, setLoadingGroups] = useState(false);
    const [targetGroup, setTargetGroup] = useState("");
+   const [eventGroups, setEventGroups] = useState<EventGroup[]>([]);
+   const [originFilter, setOriginFilter] = useState<string>("all");
+   const [detailId, setDetailId] = useState<string | null>(null);
    const nav = useNavigate();
    async function loadGroups() {
      setLoadingGroups(true);
@@ -235,10 +264,24 @@ function Column({
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   async function load() {
-    try { setLeads(await api<Lead[]>("/leads")); }
+    try {
+      const params = new URLSearchParams();
+      if (originFilter === "none") params.set("eventId", "none");
+      else if (originFilter !== "all") {
+        if (originFilter.startsWith("sales:")) params.set("source", originFilter);
+        else params.set("eventId", originFilter);
+      }
+      const qs = params.toString();
+      const [list, groups] = await Promise.all([
+        api<Lead[]>(`/leads${qs ? `?${qs}` : ""}`),
+        api<EventGroup[]>("/leads/by-event").catch(() => [] as EventGroup[]),
+      ]);
+      setLeads(list);
+      setEventGroups(groups);
+    }
     catch (e: any) { toast.error(e.message); }
   }
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [originFilter]);
 
   async function quickCreate() {
     if (!quick.name || !quick.email) { toast.error("Nome e email obrigatórios"); return; }
@@ -257,6 +300,32 @@ function Column({
   }
 
   function onStart(e: DragStartEvent) { setActiveId(String(e.active.id)); }
+
+  function exportCsv() {
+    const rows = filteredLeads;
+    if (rows.length === 0) { toast.error("Nada para exportar com o filtro atual"); return; }
+    const esc = (v: any) => {
+      const s = v == null ? "" : String(v);
+      return /[";\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const header = ["nome", "email", "telefone", "empresa", "etapa", "temperatura", "score", "origem", "evento", "criado_em"];
+    const lines = rows.map((l) => [
+      l.name, l.email, l.phone || "", l.company || "", l.stage, l.temperature || "",
+      l.score ?? "", l.source || "", l.eventName || "", l.createdAt ? new Date(l.createdAt).toLocaleString("pt-BR") : "",
+    ].map(esc).join(";"));
+    const csv = "﻿" + header.join(";") + "\r\n" + lines.join("\r\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const origin = originFilter === "all" ? "todos" : (eventGroups.find((g) => (g.eventId || "none") === originFilter)?.eventName || originFilter);
+    a.href = url;
+    a.download = `leads-${origin}-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast.success(`${rows.length} leads exportados!`);
+  }
 
   async function onEnd(e: DragEndEvent) {
     setActiveId(null);
@@ -324,6 +393,9 @@ function Column({
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <Button variant="outline" className="border-accent/40" onClick={exportCsv}>
+              <Download className="h-4 w-4 mr-2" />Exportar CSV
+            </Button>
             <Dialog open={quickOpen} onOpenChange={setQuickOpen}>
               <DialogTrigger asChild>
                 <Button variant="outline" className="border-accent/40">
@@ -403,6 +475,19 @@ function Column({
         <Badge variant="outline" className="border-border/60 bg-card/40">
           {filteredLeads.length} leads nesta visão
         </Badge>
+        <Select value={originFilter} onValueChange={setOriginFilter}>
+          <SelectTrigger className="w-[240px] bg-card/50 border-border/60">
+            <SelectValue placeholder="Origem: todas" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todas as origens</SelectItem>
+            {eventGroups.map((g) => (
+              <SelectItem key={g.eventId || "none"} value={g.eventId || "none"}>
+                {g.eventName} ({g.total})
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
 
        {funnelView === "list" ? (
@@ -428,7 +513,7 @@ function Column({
                <Card 
                  key={l.id} 
                  className={`p-4 flex items-center gap-4 hover:border-primary/40 transition-all cursor-pointer ${selectedLeads.includes(l.id) ? 'border-primary bg-primary/5' : ''}`}
-                 onClick={() => nav(`/app/leads/${l.id}`)}
+                 onClick={() => setDetailId(l.id)}
                >
                  <div 
                    className="h-5 w-5 rounded border border-primary flex items-center justify-center shrink-0"
@@ -450,16 +535,17 @@ function Column({
                    <Badge variant="outline" className="text-[10px] capitalize">
                      {STAGES.find(s => s.id === l.stage)?.label}
                    </Badge>
+                   {originLabel(l) && (
+                     <Badge variant="outline" className="text-[10px] border-accent/40 bg-accent/10 text-accent">
+                       <Tag className="h-2 w-2 mr-1" /> {originLabel(l)}
+                     </Badge>
+                   )}
                    {(l as any).tags?.map((tag: string) => (
                      <Badge key={tag} className="text-[10px] bg-secondary/20 text-secondary-foreground border-secondary/30">
                        <Tag className="h-2 w-2 mr-1" /> {tag}
                      </Badge>
-                   )) || (
-                     <>
-                       {l.stage === 'client' && <Badge className="text-[10px] bg-violet-500/20 text-violet-300 border-violet-500/30">Mentorado</Badge>}
-                       <Badge variant="outline" className="text-[10px]">Evento: Masterclass</Badge>
-                     </>
-                   )}
+                   ))}
+                   {l.stage === 'client' && <Badge className="text-[10px] bg-violet-500/20 text-violet-300 border-violet-500/30">Mentorado</Badge>}
                  </div>
                  <div className="text-right shrink-0">
                    <div className="text-xs font-medium">Histórico</div>
@@ -478,7 +564,7 @@ function Column({
                  index={i}
                  stage={s}
                  leads={filteredLeads.filter((l) => l.stage === s.id)}
-                 onOpen={(id) => nav(`/app/leads/${id}`)}
+                 onOpen={(id) => setDetailId(id)}
                />
              ))}
            </div>
@@ -486,8 +572,17 @@ function Column({
          </DndContext>
        )}
  
-       <Dialog open={groupDialogOpen} onOpenChange={setGroupDialogOpen}>
-         <DialogContent>
+       <LeadDetailModal
+         leadId={detailId}
+         eventGroups={eventGroups}
+         onClose={() => setDetailId(null)}
+         onSaved={(saved) => {
+           setLeads((prev) => prev ? prev.map((l) => (l.id === saved.id ? { ...l, ...saved } : l)) : prev);
+           setDetailId(null);
+         }}
+         onOpenDossier={(id) => { setDetailId(null); nav(`/app/leads/${id}`); }}
+       />
+       <Dialog open={groupDialogOpen} onOpenChange={setGroupDialogOpen}>         <DialogContent>
            <DialogHeader>
              <DialogTitle>Incluir leads em Grupo/Canal</DialogTitle>
              <DialogDescription>

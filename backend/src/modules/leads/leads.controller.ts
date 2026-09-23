@@ -84,16 +84,17 @@ export class LeadsController {
     @Query('stage') stage?: LeadStage,
     @Query('q') q?: string,
     @Query('eventId') eventId?: string,
+    @Query('source') source?: string,
+    @Query('salesPageId') salesPageId?: string,
   ) {
-    const list = await this.leads.list(mentorId, { stage, q });
-    const filtered = eventId ? list.filter((l) => l.eventId === eventId) : list;
+    const filtered = await this.leads.list(mentorId, { stage, q, eventId, source, salesPageId });
     if (filtered.length === 0) return [];
 
     const evIds = Array.from(new Set(filtered.map((l) => l.eventId).filter(Boolean))) as string[];
     const evs = evIds.length
       ? await this.events.find({ where: { id: In(evIds), mentorId } })
       : [];
-    const evMap = new Map(evs.map((e) => [e.id, e.name]));
+    const evMap = new Map(evs.map((e) => [e.id, e]));
 
     const emails = filtered.map((l) => l.email);
     const usersFound = emails.length
@@ -103,9 +104,25 @@ export class LeadsController {
 
     return filtered.map((l) => ({
       ...l,
-      eventName: l.eventId ? evMap.get(l.eventId) || null : null,
+      eventName: l.eventId ? evMap.get(l.eventId)?.name || null : null,
+      eventSlug: l.eventId ? evMap.get(l.eventId)?.slug || null : null,
       isMentorado: mentoradoEmails.has(l.email),
     }));
+  }
+
+  /** Detalhe do lead com origem resolvida (para o modal do kanban). */
+  @Auth('mentor', 'super_admin')
+  @Get(':id')
+  async get(@TenantId() mentorId: string, @Param('id') id: string) {
+    const lead = await this.leads.getById(mentorId, id);
+    let eventName: string | null = null;
+    let eventSlug: string | null = null;
+    if ((lead as any).eventId) {
+      const ev = await this.events.findOne({ where: { id: (lead as any).eventId, mentorId } });
+      eventName = ev?.name || null;
+      eventSlug = ev?.slug || null;
+    }
+    return { ...lead, eventName, eventSlug };
   }
 
   @Auth('mentor', 'super_admin')
@@ -154,12 +171,6 @@ export class LeadsController {
       });
     }
     return result;
-  }
-
-  @Auth('mentor', 'super_admin')
-  @Get(':id')
-  get(@TenantId() mentorId: string, @Param('id') id: string) {
-    return this.leads.getById(mentorId, id);
   }
 
   @Auth('mentor', 'super_admin')

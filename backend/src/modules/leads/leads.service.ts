@@ -13,10 +13,16 @@ export class LeadsService {
     private authService: AuthService,
   ) {}
 
-  list(mentorId: string, filter?: { stage?: LeadStage; q?: string }) {
+  list(mentorId: string, filter?: { stage?: LeadStage; q?: string; eventId?: string; source?: string; salesPageId?: string }) {
     const qb = this.leads.createQueryBuilder('l').where('l.mentorId = :mentorId', { mentorId }).orderBy('l.updatedAt', 'DESC');
     if (filter?.stage) qb.andWhere('l.stage = :stage', { stage: filter.stage });
     if (filter?.q) qb.andWhere('(l.name ILIKE :q OR l.email ILIKE :q OR l.company ILIKE :q)', { q: `%${filter.q}%` });
+    if (filter?.eventId) {
+      if (filter.eventId === 'none') qb.andWhere('l.eventId IS NULL');
+      else qb.andWhere('l.eventId = :eventId', { eventId: filter.eventId });
+    }
+    if (filter?.source) qb.andWhere('l.source ILIKE :source', { source: `%${filter.source}%` });
+    if (filter?.salesPageId) qb.andWhere('l.salesPageId = :salesPageId', { salesPageId: filter.salesPageId });
     return qb.getMany();
   }
 
@@ -28,7 +34,18 @@ export class LeadsService {
 
   async update(mentorId: string, id: string, dto: Partial<Lead>) {
     await this.getById(mentorId, id);
-    await this.leads.update(id, dto);
+    // Whitelist: nunca permitir trocar dono/vínculos de usuário por aqui.
+    const { mentorId: _m, userId: _u, id: _id, createdAt: _c, updatedAt: _up, ...safe } = dto as any;
+    if ((safe as any).email) {
+      const email = String((safe as any).email).toLowerCase();
+      const dup = await this.leads.findOne({ where: { mentorId, email } });
+      if (dup && dup.id !== id) {
+        const { BadRequestException } = await import('@nestjs/common');
+        throw new BadRequestException('Já existe um lead com este email no seu funil.');
+      }
+      (safe as any).email = email;
+    }
+    await this.leads.update(id, safe);
     return this.getById(mentorId, id);
   }
 
@@ -42,6 +59,8 @@ export class LeadsService {
     revenue?: number;
     source?: string;
     eventId?: string;
+    salesPageId?: string;
+    salesPageSlug?: string;
     /** Senha definida pelo próprio lead no auto-cadastro público. */
     password?: string;
   }) {
@@ -69,11 +88,17 @@ export class LeadsService {
         revenue: params.revenue,
         source: params.source || 'capture',
         eventId: params.eventId,
+        salesPageId: params.salesPageId,
+        salesPageSlug: params.salesPageSlug,
         stage: LeadStage.NEW,
       });
       await this.leads.save(lead);
-    } else if (params.eventId && !lead.eventId) {
-      lead.eventId = params.eventId;
+    } else if ((params.eventId && !lead.eventId) || (params.salesPageId && !(lead as any).salesPageId)) {
+      if (params.eventId && !lead.eventId) lead.eventId = params.eventId;
+      if (params.salesPageId && !(lead as any).salesPageId) {
+        (lead as any).salesPageId = params.salesPageId;
+        (lead as any).salesPageSlug = params.salesPageSlug;
+      }
       await this.leads.save(lead);
     }
 

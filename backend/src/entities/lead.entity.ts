@@ -19,6 +19,8 @@ export enum LeadTemperature {
 
 @Entity('leads')
 @Index(['mentorId', 'stage'])
+@Index(['mentorId', 'eventId'])
+@Index(['mentorId', 'salesPageId'])
 export class Lead {
   @PrimaryGeneratedColumn('uuid')
   id: string;
@@ -55,6 +57,14 @@ export class Lead {
   /** FK para events.id quando o lead veio de um evento específico. */
   @Column({ type: 'uuid', nullable: true })
   eventId?: string;
+
+  /** FK para sales_pages.id quando o lead veio de uma página de vendas. */
+  @Column({ type: 'uuid', nullable: true })
+  salesPageId?: string;
+
+  /** Slug da página de vendas de origem (ex.: sales:minha-pagina). */
+  @Column({ nullable: true })
+  salesPageSlug?: string;
 
   @Column({ type: 'enum', enum: LeadStage, default: LeadStage.NEW })
   stage: LeadStage;
