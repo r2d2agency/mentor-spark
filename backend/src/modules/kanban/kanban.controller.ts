@@ -7,6 +7,7 @@ import { KanbanBoard, BoardType } from '../../entities/kanban-board.entity';
 import { KanbanColumn } from '../../entities/kanban-column.entity';
 import { KanbanCard, CardEntityType } from '../../entities/kanban-card.entity';
 import { Lead } from '../../entities/lead.entity';
+import { CaptureEvent } from '../../entities/capture-event.entity';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 
 const DEFAULT_LEAD_COLUMNS = [
@@ -27,6 +28,7 @@ export class KanbanController {
     @InjectRepository(KanbanColumn) private columns: Repository<KanbanColumn>,
     @InjectRepository(KanbanCard) private cards: Repository<KanbanCard>,
     @InjectRepository(Lead) private leads: Repository<Lead>,
+    @InjectRepository(CaptureEvent) private events: Repository<CaptureEvent>,
   ) {}
 
   // ============== BOARDS ==============
@@ -73,8 +75,33 @@ export class KanbanController {
     const board = await this.boards.findOne({ where: { id, mentorId } });
     if (!board) throw new NotFoundException('Board não encontrado');
     const columns = await this.columns.find({ where: { boardId: id }, order: { order: 'ASC' } });
-    const cards = await this.cards.find({ where: { boardId: id }, order: { order: 'ASC', createdAt: 'ASC' } });
-    return { ...board, columns, cards };
+    const cards = await this.cards.find({ where: { boardId: id, mentorId }, order: { order: 'ASC', createdAt: 'ASC' } });
+    const leadIds = Array.from(new Set(cards
+      .filter((card) => card.entityType === CardEntityType.LEAD && card.entityId)
+      .map((card) => card.entityId!)));
+
+    if (leadIds.length === 0) return { ...board, columns, cards };
+
+    const leads = await this.leads.find({ where: { id: In(leadIds), mentorId } });
+    const eventIds = Array.from(new Set(leads.map((lead) => lead.eventId).filter(Boolean))) as string[];
+    const events = eventIds.length
+      ? await this.events.find({ where: { id: In(eventIds), mentorId } })
+      : [];
+    const eventNames = new Map(events.map((event) => [event.id, event.name]));
+    const leadsById = new Map(leads.map((lead) => [lead.id, lead]));
+
+    const cardsWithOrigin = cards.map((card) => {
+      if (card.entityType !== CardEntityType.LEAD || !card.entityId) return card;
+      const lead = leadsById.get(card.entityId);
+      if (!lead) return card;
+      const originLabel = (lead.eventId && eventNames.get(lead.eventId))
+        || (lead.salesPageSlug && `Vendas: ${lead.salesPageSlug}`)
+        || lead.source
+        || null;
+      return { ...card, originLabel };
+    });
+
+    return { ...board, columns, cards: cardsWithOrigin };
   }
 
   @Auth('mentor', 'super_admin')

@@ -7,12 +7,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
-import { Loader2, Plus, Settings, Trash2, ArrowLeft } from "lucide-react";
+import { Loader2, Plus, Settings, Trash2, ArrowLeft, Tag } from "lucide-react";
 import { toast } from "sonner";
 import { DndContext, DragEndEvent, PointerSensor, useDraggable, useDroppable, useSensor, useSensors } from "@dnd-kit/core";
 
 interface Column { id: string; name: string; color: string; order: number; slug?: string; }
-interface Card { id: string; columnId: string; title: string; description?: string; order: number; }
+interface Card { id: string; columnId: string; title: string; description?: string; originLabel?: string | null; order: number; }
 interface Board { id: string; name: string; color?: string; columns: Column[]; cards: Card[]; }
 
 function CardItem({ card }: { card: Card }) {
@@ -22,6 +22,7 @@ function CardItem({ card }: { card: Card }) {
     <Card ref={setNodeRef} style={style} {...attributes} {...listeners} className="p-3 cursor-grab active:cursor-grabbing hover:border-primary/40">
       <div className="font-medium text-sm">{card.title}</div>
       {card.description && <div className="text-xs text-muted-foreground mt-1">{card.description}</div>}
+      {card.originLabel && <div className="flex items-center gap-1 text-xs text-muted-foreground mt-2 truncate"><Tag className="h-3 w-3 shrink-0" /><span className="truncate">{card.originLabel}</span></div>}
     </Card>
   );
 }
