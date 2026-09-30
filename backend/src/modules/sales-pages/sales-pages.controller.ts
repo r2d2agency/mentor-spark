@@ -48,7 +48,7 @@ export class SalesPagesController {
   @Post('generate')
   generate(
     @TenantId() mentorId: string,
-    @Body() dto: { briefing: string; audience?: string; priceHint?: string; productType?: SalesPageProductType; tone?: string },
+    @Body() dto: { briefing: string; audience?: string; priceHint?: string; productType?: SalesPageProductType; tone?: string; template?: 'classic' | 'long_form'; outputFormat?: 'blocks' | 'html' },
   ) {
     return this.svc.generate(mentorId, dto);
   }

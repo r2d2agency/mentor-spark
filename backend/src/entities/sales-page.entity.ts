@@ -105,6 +105,19 @@ export interface SalesPageTheme {
 
 export type SalesPageTemplate = 'classic' | 'long_form';
 
+export type SalesPageBlockType = 'hero' | 'text' | 'features' | 'faq' | 'cta' | 'testimonial' | 'section';
+
+export interface SalesPageBlock {
+  type: SalesPageBlockType;
+  id?: string;
+  props: Record<string, unknown>;
+}
+
+export interface SalesPageDocument {
+  version: number;
+  blocks: SalesPageBlock[];
+}
+
 /**
  * Página de vendas 1 produto = 1 página, publicada em /p/:mentorSlug/:pageSlug.
  * Checkout transparente Asaas usa o MentorPaymentProvider vinculado.
@@ -151,6 +164,13 @@ export class SalesPage {
 
   @Column({ type: 'jsonb', default: '[]' })
   features: SalesPageFeature[];
+
+  /** Documento flexível versionado; os campos legados acima seguem como projeção compatível. */
+  @Column({ type: 'jsonb', nullable: true })
+  document?: SalesPageDocument;
+
+  @Column({ type: 'text', nullable: true })
+  html?: string;
 
   @Column({ type: 'jsonb', default: '[]' })
   faqs: SalesPageFaq[];

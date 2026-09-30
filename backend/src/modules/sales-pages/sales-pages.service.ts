@@ -3,12 +3,83 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
   SalesPage, SalesPagePaymentMode, SalesPageProductType,
-  SalesPageCoupon,
+  SalesPageCoupon, SalesPageDocument, SalesPageBlock,
 } from '../../entities/sales-page.entity';
 import { User, UserStatus } from '../../entities/user.entity';
 import { MentorPaymentProvider, PaymentProviderType } from '../../entities/mentor-payment-provider.entity';
 import { AiService } from '../ai/ai.service';
 import { LeadsService } from '../leads/leads.service';
+
+type SalesPageOutputFormat = 'blocks' | 'html';
+
+function escapeHtml(value: unknown): string {
+  return String(value ?? '').replace(/[&<>\"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', "'": '&#39;' }[char] || char));
+}
+
+const BLOCK_TYPES = new Set<SalesPageBlock['type']>(['hero', 'text', 'features', 'faq', 'cta', 'testimonial', 'section']);
+const MAX_DOCUMENT_BLOCKS = 50;
+const MAX_DOCUMENT_BYTES = 500_000;
+
+function validateDocument(value: unknown): SalesPageDocument {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new BadRequestException('document deve ser um objeto SalesPageDocument.');
+  }
+  const input = value as Partial<SalesPageDocument>;
+  if (input.version !== 1 || !Array.isArray(input.blocks)) {
+    throw new BadRequestException('document deve conter version 1 e uma lista de blocks.');
+  }
+  if (input.blocks.length > MAX_DOCUMENT_BLOCKS || Buffer.byteLength(JSON.stringify(value), 'utf8') > MAX_DOCUMENT_BYTES) {
+    throw new BadRequestException('document excede os limites de tamanho ou quantidade de blocos.');
+  }
+  const blocks = input.blocks.map((block) => {
+    if (!block || typeof block !== 'object' || !BLOCK_TYPES.has((block as SalesPageBlock).type) || !block.props || typeof block.props !== 'object' || Array.isArray(block.props)) {
+      throw new BadRequestException('document contém um bloco inválido.');
+    }
+    return {
+      type: block.type,
+      ...(typeof block.id === 'string' ? { id: block.id.slice(0, 100) } : {}),
+      props: block.props as Record<string, unknown>,
+    };
+  });
+  return { version: 1, blocks };
+}
+
+function normalizeBlocks(content: any): { document: SalesPageDocument; warnings: string[] } {
+  const warnings: string[] = [];
+  const blocks: SalesPageBlock[] = [];
+  const add = (type: SalesPageBlock['type'], props: Record<string, unknown>) => blocks.push({ type, props });
+  if (content.title || content.headline) add('hero', { title: content.title, headline: content.headline, subheadline: content.subheadline });
+  if (content.description) add('text', { text: content.description });
+  if (Array.isArray(content.features) && content.features.length) add('features', { items: content.features });
+  if (Array.isArray(content.sections)) content.sections.forEach((section: any) => add('section', section));
+  if (Array.isArray(content.faqs) && content.faqs.length) add('faq', { items: content.faqs });
+  if (content.ctaText) add('cta', { text: content.ctaText });
+  if (!blocks.length) warnings.push('Nenhum bloco de conteúdo foi gerado.');
+  return { document: { version: 1, blocks }, warnings };
+}
+
+function sanitizeHtml(value: unknown): string {
+  return String(value ?? '')
+    .slice(0, 200000)
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, '')
+    .replace(/\son[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
+    .replace(/javascript\s*:/gi, 'about:blank');
+}
+
+function blocksToHtml(document: SalesPageDocument): string {
+  return document.blocks.map((block) => {
+    const p: any = block.props;
+    switch (block.type) {
+      case 'hero': return `<header><h1>${escapeHtml(p.headline || p.title)}</h1><p>${escapeHtml(p.subheadline)}</p></header>`;
+      case 'text': return `<section><p>${escapeHtml(p.text)}</p></section>`;
+      case 'features': return `<section><ul>${(Array.isArray(p.items) ? p.items : []).map((i: any) => `<li><strong>${escapeHtml(i.title)}</strong> ${escapeHtml(i.text)}</li>`).join('')}</ul></section>`;
+      case 'faq': return `<section><dl>${(Array.isArray(p.items) ? p.items : []).map((i: any) => `<dt>${escapeHtml(i.q)}</dt><dd>${escapeHtml(i.a)}</dd>`).join('')}</dl></section>`;
+      case 'cta': return `<section><a href="#checkout">${escapeHtml(p.text)}</a></section>`;
+      case 'section': return `<section><h2>${escapeHtml(p.title)}</h2><p>${escapeHtml(p.body)}</p></section>`;
+      default: return '';
+    }
+  }).join('');
+}
 
 function slugify(s: string) {
   return s
@@ -67,6 +138,7 @@ export class SalesPagesService {
       heroImageUrl: dto.heroImageUrl,
       videoUrl: dto.videoUrl,
       features: dto.features || [],
+      document: dto.document === undefined ? undefined : validateDocument(dto.document),
       faqs: dto.faqs || [],
       testimonials: dto.testimonials || [],
       badges: dto.badges || [],
@@ -110,6 +182,8 @@ export class SalesPagesService {
       heroImageUrl: source.heroImageUrl,
       videoUrl: source.videoUrl,
       features: structuredClone(source.features || []),
+      document: source.document ? structuredClone(source.document) : source.document,
+      html: source.html,
       faqs: structuredClone(source.faqs || []),
       testimonials: structuredClone(source.testimonials || []),
       badges: structuredClone(source.badges || []),
@@ -150,12 +224,12 @@ export class SalesPagesService {
       'heroImageUrl', 'videoUrl', 'features', 'faqs', 'testimonials', 'badges',
       'guaranteeText', 'ctaText', 'priceCents', 'currency', 'originalPriceCents',
       'maxInstallments', 'paymentMode', 'subscriptionCycle', 'paymentProviderId',
-      'theme', 'seo', 'published',
+      'theme', 'seo', 'published', 'document', 'html',
       'template', 'forWho', 'notForWho', 'agenda', 'sections', 'about', 'eventInfo', 'urgencyText',
       'coupons', 'countdown',
     ];
     for (const k of editable) {
-      if (dto[k] !== undefined) (p as any)[k] = dto[k];
+      if (dto[k] !== undefined) (p as any)[k] = k === 'document' ? validateDocument(dto[k]) : dto[k];
     }
     return this.pages.save(p);
   }
@@ -174,6 +248,7 @@ export class SalesPagesService {
     productType?: SalesPageProductType;
     tone?: string;
     template?: 'classic' | 'long_form';
+    outputFormat?: SalesPageOutputFormat;
   }) {
     if (!dto.briefing || dto.briefing.trim().length < 10) {
       throw new BadRequestException('Descreva melhor o produto (mínimo 10 caracteres).');
@@ -239,7 +314,7 @@ Gere o JSON agora.`;
       throw new BadRequestException('IA retornou JSON malformado. Tente novamente.');
     }
     // sanitiza
-    return {
+    const legacy = {
       title: String(parsed.title || '').slice(0, 100),
       headline: String(parsed.headline || '').slice(0, 200),
       subheadline: String(parsed.subheadline || '').slice(0, 400),
@@ -291,6 +366,13 @@ Gere o JSON agora.`;
         extra: String(parsed.eventInfo.extra || '').slice(0, 160),
       } : undefined,
       urgencyText: String(parsed.urgencyText || '').slice(0, 200),
+    };
+    const normalized = normalizeBlocks(legacy);
+    return {
+      ...legacy,
+      document: normalized.document,
+      warnings: normalized.warnings,
+      ...(dto.outputFormat === 'html' ? { html: sanitizeHtml(blocksToHtml(normalized.document)) } : {}),
     };
   }
 

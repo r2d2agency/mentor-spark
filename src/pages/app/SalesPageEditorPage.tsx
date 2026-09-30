@@ -94,6 +94,8 @@ type SalesPage = {
   urgencyText?: string;
   countdown?: { enabled?: boolean; endsAt?: string; label?: string; hideWhenExpired?: boolean };
   coupons?: Coupon[];
+  document?: { version: 1; blocks: Array<{ type: "hero" | "text" | "features" | "faq" | "cta" | "testimonial" | "section"; id?: string; props: Record<string, unknown> }> };
+  html?: string;
 };
 
 type Provider = { id: string; type: string; label?: string; environment: string; hasApiKey: boolean };
@@ -111,6 +113,15 @@ export default function SalesPageEditorPage() {
   const [briefing, setBriefing] = useState("");
   const [audience, setAudience] = useState("");
   const [priceHint, setPriceHint] = useState("");
+  const [outputFormat, setOutputFormat] = useState<"blocks" | "html">("blocks");
+  const [generatedHtml, setGeneratedHtml] = useState("");
+  const [showGeneratedHtml, setShowGeneratedHtml] = useState(false);
+
+  // Keep generated HTML editable, but never inject it into the editor DOM.
+  const sanitizePreviewHtml = (value: string) => value
+    .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, "")
+    .replace(/\son[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+    .replace(/javascript\s*:/gi, "about:blank");
 
   useEffect(() => {
     (async () => {
@@ -170,27 +181,41 @@ export default function SalesPageEditorPage() {
       setGenerating(true);
       const g = await api<any>("/sales-pages/generate", {
         method: "POST",
-        body: { briefing, audience, priceHint, productType: page?.productType, template: page?.template || "classic" },
+        body: { briefing, audience, priceHint, productType: page?.productType, template: page?.template || "classic", outputFormat },
       });
+      const generatedDocument = g?.document;
+      if (outputFormat === "html") {
+        if (typeof g?.html !== "string") throw new Error("A IA não retornou HTML utilizável.");
+        setGeneratedHtml(g.html);
+        setShowGeneratedHtml(true);
+        toast.success("HTML gerado. Revise e aplique para persistir.");
+        return;
+      }
+      const result = g;
+      const normalizedDocument = generatedDocument && typeof generatedDocument === "object" && Array.isArray(generatedDocument.blocks)
+        ? generatedDocument
+        : undefined;
       patch({
-        title: g.title || page?.title,
-        headline: g.headline,
-        subheadline: g.subheadline,
-        description: g.description,
-        features: g.features || [],
-        badges: g.badges || [],
-        guaranteeText: g.guaranteeText,
-        ctaText: g.ctaText || page?.ctaText,
-        faqs: g.faqs || [],
-        seo: g.seo,
+        document: normalizedDocument,
+        ...(normalizedDocument ? {} : { document: undefined }),
+        title: result.title || page?.title,
+        headline: result.headline,
+        subheadline: result.subheadline,
+        description: result.description,
+        features: result.features || [],
+        badges: result.badges || [],
+        guaranteeText: result.guaranteeText,
+        ctaText: result.ctaText || page?.ctaText,
+        faqs: result.faqs || [],
+        seo: result.seo,
         ...(page?.template === "long_form" ? {
-          forWho: g.forWho || [],
-          notForWho: g.notForWho || [],
-          agenda: g.agenda || [],
-          sections: g.sections || [],
-          about: g.about || page?.about,
-          eventInfo: g.eventInfo || page?.eventInfo,
-          urgencyText: g.urgencyText || "",
+          forWho: result.forWho || [],
+          notForWho: result.notForWho || [],
+          agenda: result.agenda || [],
+          sections: result.sections || [],
+          about: result.about || page?.about,
+          eventInfo: result.eventInfo || page?.eventInfo,
+          urgencyText: result.urgencyText || "",
         } : {}),
       });
       toast.success("Copy gerada! Revise e salve.");
@@ -667,10 +692,42 @@ export default function SalesPageEditorPage() {
                 <Input value={priceHint} onChange={(e) => setPriceHint(e.target.value)} placeholder="R$ 2.997 à vista ou 12x R$ 297" />
               </div>
             </div>
+            <div className="space-y-2">
+              <Label>Formato da saída</Label>
+              <Select value={outputFormat} onValueChange={(value) => setOutputFormat(value as "blocks" | "html")}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="blocks">JSON / blocos editáveis</SelectItem>
+                  <SelectItem value="html">HTML (revisar antes de usar)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             <Button onClick={generateWithAi} disabled={generating} className="bg-gradient-primary shadow-glow">
               {generating ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Sparkles className="h-4 w-4 mr-2" />}
               Gerar copy com IA
             </Button>
+            {generatedHtml !== "" && (
+              <div className="space-y-3 border-t pt-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h4 className="font-semibold">HTML gerado</h4>
+                    <p className="text-xs text-muted-foreground">O conteúdo é tratado como texto e não é executado nesta tela.</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="button" variant="outline" size="sm" onClick={() => setShowGeneratedHtml((value) => !value)}>
+                      {showGeneratedHtml ? "Ocultar visualização" : "Visualizar com segurança"}
+                    </Button>
+                    <Button type="button" size="sm" onClick={() => void save({ html: generatedHtml })}>
+                      Aplicar e salvar
+                    </Button>
+                  </div>
+                </div>
+                <Textarea aria-label="HTML gerado editável" rows={12} value={generatedHtml} onChange={(event) => setGeneratedHtml(event.target.value)} spellCheck={false} />
+                {showGeneratedHtml && (
+                  <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted p-4 text-xs">{sanitizePreviewHtml(generatedHtml)}</pre>
+                )}
+              </div>
+            )}
           </Card>
         </TabsContent>
 
