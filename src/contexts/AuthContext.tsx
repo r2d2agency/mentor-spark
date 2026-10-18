@@ -54,6 +54,7 @@ interface AuthContextValue {
   logout: () => void;
   signupMentor: (data: { name: string; email: string; password: string; brandName?: string }) => Promise<{ access_token?: string; user?: SessionUser; message?: string }>;
   refreshUser: () => Promise<void>;
+  redeemAccessLink: (token: string) => Promise<SessionUser>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -267,6 +268,23 @@ const AuthContext = createContext<AuthContextValue | null>(null);
    }, [refreshFromHost]);
 
   useEffect(() => {
+    // Checa primeiro o link de compra (?tk=) — se presente, troca por sessão real
+    // antes de qualquer ProtectedRoute redirecionar.
+    const url = new URL(window.location.href);
+    const tk = url.searchParams.get("tk");
+    if (tk) {
+      setLoading(true);
+      redeemAccessLink(tk)
+        .catch(() => {
+          // Link inválido/expirado — remove o tk e segue o fluxo normal
+          url.searchParams.delete("tk");
+          window.history.replaceState({}, "", url.toString());
+          setToken(null);
+        })
+        .finally(() => setLoading(false));
+      return;
+    }
+
     const t = getToken();
     if (!t) {
       setLoading(false);
@@ -316,8 +334,35 @@ const AuthContext = createContext<AuthContextValue | null>(null);
     return res;
   }
 
+  /**
+   * Troca o link de compra (`?tk=`) por uma sessão real de PROSPECT.
+   * Emitido no checkout da página de vendas; validado no backend contra o
+   * PurchaseLinksService (aud `sales-page-checkout`). Limpa o `tk` da URL
+   * para não ficar exposto no histórico.
+   */
+  async function redeemAccessLink(token: string) {
+    const res = await api<{ access_token: string; user: SessionUser }>("/sales-pages/access/redeem", {
+      method: "POST",
+      body: { token },
+      auth: false,
+    });
+    setToken(res.access_token);
+    setUser(res.user);
+    applyUserBrand(res.user);
+    // Remove o tk da URL sem recarregar a página
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("tk");
+      window.history.replaceState({}, "", url.toString());
+    } catch { /* noop */ }
+    if (res.user.role === "prospect" || res.user.role === "mentorado" || res.user.role === "mentor_team") {
+      await refreshUser();
+    }
+    return res.user;
+  }
+
   return (
-    <AuthContext.Provider value={{ user, staffMentor, loading, login, logout, signupMentor, refreshUser }}>
+    <AuthContext.Provider value={{ user, staffMentor, loading, login, logout, signupMentor, refreshUser, redeemAccessLink }}>
       {children}
     </AuthContext.Provider>
   );
@@ -327,4 +372,15 @@ export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuth must be inside AuthProvider");
   return ctx;
+}
+
+interface AuthContextValue {
+  user: SessionUser | null;
+  staffMentor: StaffMentor | null;
+  loading: boolean;
+  login: (email: string, password: string) => Promise<SessionUser>;
+  logout: () => void;
+  signupMentor: (data: { name: string; email: string; password: string; brandName?: string }) => Promise<{ access_token?: string; user?: SessionUser; message?: string }>;
+  refreshUser: () => Promise<void>;
+  redeemAccessLink: (token: string) => Promise<SessionUser>;
 }

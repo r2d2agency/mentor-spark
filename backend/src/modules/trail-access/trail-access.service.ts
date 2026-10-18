@@ -356,7 +356,24 @@ export class TrailAccessService {
    */
   async onChargePaid(chargeId: string) {
     const charge = await this.charges.findOne({ where: { id: chargeId } });
-    const reqId = (charge?.metadata as any)?.trailAccessRequestId;
+    const meta = (charge?.metadata as any) || {};
+
+    // Caminho 1: compra vindo de página de vendas.
+    // metadata.kind === 'sales-page' traz productRefId (conteúdo comprado) e,
+    // opcionalmente, upsellTrailId (oferta de upgrade apresentada no pós-venda).
+    if (meta.kind === 'sales-page') {
+      await this.grantSalesPageAccess(charge!, meta);
+      return;
+    }
+
+    // Caminho 1b: upsell adquirido no pós-venda — libera a trilha extra.
+    if (meta.kind === 'sales-page-upsell' && meta.trailId && meta.leadId) {
+      await this.grantOverride(charge!.mentorId, meta.trailId, meta.leadId, TrailAccessSource.PAYMENT, charge!.id);
+      return;
+    }
+
+    // Caminho 2: cobrança de paywall de trilha (fluxo legado).
+    const reqId = meta.trailAccessRequestId;
     if (!reqId) return;
     const req = await this.requests.findOne({ where: { id: reqId } });
     if (!req) return;
@@ -365,5 +382,58 @@ export class TrailAccessService {
     req.status = TrailAccessRequestStatus.PAID;
     req.resolvedAt = new Date();
     await this.requests.save(req);
+  }
+
+  /**
+   * Concede o acesso ao conteúdo da página de vendas recém-paga. O override de
+   * TrailAccess tem prioridade sobre accessMode/grupos/pré-requisitos, então o
+   * comprador cai direto nos vídeos — mesmo que a trilha seja REQUEST ou esteja
+   * liberada por grupo. Best-effort: nunca lança para não quebrar o webhook.
+   */
+  async grantSalesPageAccess(charge: Charge, meta: any) {
+    const trailId: string | null = meta.trailId || meta.productRefId || null;
+    const leadId: string | null = meta.leadId || charge.leadId || null;
+    const mentorId: string = charge.mentorId;
+    if (!trailId || !leadId) return;
+
+    const lead = await this.leads.findOne({ where: { id: leadId, mentorId } });
+    if (!lead) return;
+    const trail = await this.trails.findOne({ where: { id: trailId, mentorId } });
+    if (!trail) {
+      this.logger.warn(`grantSalesPageAccess: trilha ${trailId} não existe no mentor ${mentorId}`);
+      return;
+    }
+
+    await this.grantOverride(mentorId, trailId, leadId, TrailAccessSource.PAYMENT, charge.id);
+  }
+
+  /** Upsert de override de acesso + notificação para o comprador. */
+  private async grantOverride(
+    mentorId: string,
+    trailId: string,
+    leadId: string,
+    source: TrailAccessSource,
+    sourceRef?: string,
+  ) {
+    let acc = await this.accesses.findOne({ where: { trailId, leadId } });
+    if (!acc) {
+      acc = this.accesses.create({ mentorId, trailId, leadId });
+    }
+    acc.source = source;
+    acc.sourceRef = sourceRef;
+    acc.expiresAt = null; // compra de conteúdo = acesso vitalício
+    await this.accesses.save(acc);
+
+    const lead = await this.leads.findOne({ where: { id: leadId } });
+    const trail = await this.trails.findOne({ where: { id: trailId } });
+    if (lead?.userId && trail) {
+      await this.notifications.create({
+        userId: lead.userId,
+        type: 'trail',
+        title: 'Trilha liberada 🎉',
+        body: `Você já pode acessar "${trail.title}"`,
+        link: `/me/trails/${trail.id}`,
+      }).catch(() => null);
+    }
   }
 }

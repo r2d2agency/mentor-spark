@@ -81,4 +81,34 @@ export class PublicSalesPagesController {
   ) {
     return this.svc.validateCoupon(mentorSlug, pageSlug, dto);
   }
+
+  /** Status da cobrança — a tela de obrigado consulta até a aprovação cair. */
+  @Get(':mentorSlug/:pageSlug/charge/:chargeId/status')
+  chargeStatus(
+    @Param('mentorSlug') mentorSlug: string,
+    @Param('pageSlug') pageSlug: string,
+    @Param('chargeId') chargeId: string,
+  ) {
+    return this.svc.chargeStatus(mentorSlug, pageSlug, chargeId);
+  }
+
+  /** Oferta de upgrade apresentada logo após a compra (mesmo provedor Asaas). */
+  @Post(':mentorSlug/:pageSlug/charge/:chargeId/upsell')
+  upsell(
+    @Param('mentorSlug') mentorSlug: string,
+    @Param('pageSlug') pageSlug: string,
+    @Param('chargeId') chargeId: string,
+    @Body() dto: any,
+  ) {
+    return this.svc.upsellCheckout(mentorSlug, pageSlug, chargeId, dto);
+  }
+
+  /**
+   * Troca o link de acesso (JWT `?tk=` emitido no checkout) por uma sessão real
+   * de PROSPECT, para o comprador cair direto na área de membro.
+   */
+  @Post('access/redeem')
+  redeemAccessLink(@Body() dto: { token: string }) {
+    return this.svc.redeemAccessLink(dto?.token);
+  }
 }

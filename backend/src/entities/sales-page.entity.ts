@@ -255,6 +255,27 @@ export class SalesPage {
   @Column({ type: 'jsonb', nullable: true })
   seo?: { title?: string; description?: string; ogImage?: string };
 
+  // ---- Upsell interno (pós-pagamento) ----
+  /** Trilha oferecida logo após a compra (aumento de ticket). */
+  @Column({ type: 'uuid', nullable: true })
+  upsellTrailId?: string;
+
+  @Column({ type: 'int', nullable: true })
+  upsellPriceCents?: number;
+
+  @Column({ length: 3, nullable: true })
+  upsellCurrency?: string;
+
+  @Column({ type: 'text', nullable: true })
+  upsellHeadline?: string;
+
+  @Column({ type: 'text', nullable: true })
+  upsellBody?: string;
+
+  /** Mostrar o card de upsell apenas N minutos após a compra (0 = imediato). */
+  @Column({ type: 'int', default: 0 })
+  upsellDelayMinutes?: number;
+
   @CreateDateColumn()
   createdAt: Date;
 

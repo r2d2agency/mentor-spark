@@ -42,6 +42,13 @@ type Payload = {
     badges: string[]; guaranteeText?: string; ctaText: string;
     priceCents: number; currency: string; originalPriceCents?: number;
     maxInstallments: number; paymentMode: "one_time" | "subscription";
+    productRefId?: string | null;
+    upsellTrailId?: string | null;
+    upsellPriceCents?: number | null;
+    upsellCurrency?: string | null;
+    upsellHeadline?: string | null;
+    upsellBody?: string | null;
+    upsellDelayMinutes?: number;
     seo?: { title?: string; description?: string };
     template?: "classic" | "long_form";
     theme?: {
@@ -977,6 +984,39 @@ function CheckoutDialog({
 
   const [pix, setPix] = useState<{ payload?: string; qrImage?: string } | null>(null);
 
+  // Dados do pós-checkout: cobrança, link de acesso e oferta de upsell.
+  const [chargeId, setChargeId] = useState<string | null>(null);
+  const [accessUrl, setAccessUrl] = useState<string | null>(null);
+  const [upsell, setUpsell] = useState<{
+    trailId: string; priceCents: number; currency: string;
+    headline: string; body: string | null; delayMinutes: number;
+  } | null>(null);
+  const [chargeState, setChargeState] = useState<'pending' | 'paid' | 'denied'>('pending');
+  const [checking, setChecking] = useState(false);
+  const [upsellPix, setUpsellPix] = useState<{ payload?: string; qrImage?: string } | null>(null);
+  const [upsellBought, setUpsellBought] = useState(false);
+
+  const pollStatus = async (id: string) => {
+    try {
+      const r = await fetch(
+        `${API_BASE}/public/sales-pages/${mentorSlug}/${pageSlug}/charge/${id}/status`,
+      );
+      if (!r.ok) return;
+      const data = await r.json();
+      if (data.status === 'PAID' || data.status === 'CONFIRMED') setChargeState('paid');
+      else if (data.status === 'CANCELLED' || data.status === 'REFUNDED') setChargeState('denied');
+    } catch { /* mantém pending */ }
+  };
+
+  // Quando a cobrança existe, consulta o status periodicamente até aprovar.
+  useEffect(() => {
+    if (!chargeId || chargeState !== 'pending') return;
+    pollStatus(chargeId);
+    const t = setInterval(() => pollStatus(chargeId), 5000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chargeId, chargeState]);
+
   const [couponCode, setCouponCode] = useState("");
   const [coupon, setCoupon] = useState<{
     valid: boolean; code?: string; discountCents?: number; finalCents?: number; message?: string;
@@ -1044,6 +1084,12 @@ function CheckoutDialog({
       const data = await r.json();
       if (!r.ok) throw new Error(data?.message || "Falha no checkout");
 
+      // Guarda a cobrança + link de acesso + oferta de upsell para a tela de sucesso.
+      setChargeId(data.asaasChargeId || data.chargeId || null);
+      setAccessUrl(data.accessUrl || null);
+      setUpsell(data.upsell || null);
+      setChargeState("pending");
+
       if (method === "PIX") {
         setPix(data.pix || null);
         setStep("pix");
@@ -1054,6 +1100,36 @@ function CheckoutDialog({
       toast.error(e.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  /** Redireciona para a área de membro com o link de acesso emitido no checkout. */
+  const goToAccess = () => {
+    if (accessUrl) window.location.href = accessUrl;
+    else window.location.href = "/me";
+  };
+
+  /** Upsell do pós-venda — cria uma segunda cobrança PIX na mesma página. */
+  const buyUpsell = async () => {
+    if (!chargeId || !upsell) return;
+    setChecking(true);
+    try {
+      const r = await fetch(
+        `${API_BASE}/public/sales-pages/${mentorSlug}/${pageSlug}/charge/${chargeId}/upsell`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name, email }),
+        },
+      );
+      const data = await r.json();
+      if (!r.ok) throw new Error(data?.message || "Falha no upsell");
+      setUpsellPix(data.pix || null);
+      setUpsellBought(true);
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setChecking(false);
     }
   };
 
@@ -1225,8 +1301,21 @@ function CheckoutDialog({
               </>
             )}
             <p className="text-xs text-muted-foreground">
-              Assim que o pagamento cair, você recebe a confirmação por e-mail.
+              {chargeState === "pending"
+                ? "Assim que o pagamento cair, o acesso é liberado aqui mesmo — sem depender de e-mail."
+                : "Pagamento confirmado! Seu acesso já está liberado."}
             </p>
+            <Button
+              variant="outline" className="w-full"
+              disabled={chargeState !== "paid"}
+              onClick={goToAccess}
+            >
+              {chargeState === "paid" ? (
+                <>Acessar meu conteúdo <CheckCircle2 className="h-4 w-4 ml-2" /></>
+              ) : (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Aguardando confirmação…</>
+              )}
+            </Button>
           </div>
         )}
 
@@ -1235,11 +1324,60 @@ function CheckoutDialog({
             <div className="h-14 w-14 rounded-full bg-primary/15 flex items-center justify-center mx-auto">
               <CheckCircle2 className="h-8 w-8 text-primary" />
             </div>
-            <h3 className="font-bold text-lg">Pagamento em processamento</h3>
+            <h3 className="font-bold text-lg">
+              {chargeState === "paid" ? "Pagamento confirmado 🎉" : "Pagamento em processamento"}
+            </h3>
             <p className="text-sm text-muted-foreground">
-              Você receberá a confirmação por e-mail assim que a Asaas aprovar o cartão.
+              {chargeState === "paid"
+                ? "Seu acesso está liberado. Clique abaixo para entrar na área de membro."
+                : "Assim que a Asaas aprovar, o botão abaixo libera seu acesso automaticamente."}
             </p>
-            <Button onClick={onClose} className="w-full">Fechar</Button>
+            <Button
+              className="w-full"
+              disabled={chargeState !== "paid"}
+              onClick={goToAccess}
+            >
+              {chargeState === "paid" ? (
+                <>Acessar meu conteúdo <CheckCircle2 className="h-4 w-4 ml-2" /></>
+              ) : (
+                <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Aguardando confirmação…</>
+              )}
+            </Button>
+            <Button variant="ghost" onClick={onClose}>Fechar</Button>
+          </div>
+        )}
+
+        {/* Oferta de upgrade apresentada no pós-venda (mesmo PIX do produto principal). */}
+        {upsell && !upsellBought && chargeState === "paid" && (
+          <div className="mt-6 rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
+            <div className="flex items-center gap-2">
+              <Sparkles className="h-4 w-4 text-primary" />
+              <h4 className="font-semibold text-sm">{upsell.headline}</h4>
+            </div>
+            {upsell.body && <p className="text-xs text-muted-foreground">{upsell.body}</p>}
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-lg font-bold">{money(upsell.priceCents)}</span>
+              <Button size="sm" onClick={buyUpsell} disabled={checking}>
+                {checking ? <Loader2 className="h-4 w-4 animate-spin" /> : "Quero também"}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {upsell && upsellBought && (
+          <div className="mt-6 rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3 text-center">
+            <h4 className="font-semibold text-sm">Complete o pagamento do upgrade</h4>
+            {upsellPix?.qrImage ? (
+              <img src={upsellPix.qrImage} alt="QR Code Pix" className="mx-auto w-44 h-44 rounded-lg border" />
+            ) : (
+              <div className="text-sm text-muted-foreground">Gerando QR Code…</div>
+            )}
+            {upsellPix?.payload && (
+              <div className="rounded-lg border p-2 text-[11px] break-all bg-muted/30">{upsellPix.payload}</div>
+            )}
+            <p className="text-xs text-muted-foreground">
+              O acesso à trilha extra é liberado assim que este PIX confirmar.
+            </p>
           </div>
         )}
       </DialogContent>

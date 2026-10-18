@@ -1,5 +1,6 @@
-import { BadRequestException, ForbiddenException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, Inject, Logger, NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { JwtService } from '@nestjs/jwt';
 import { Repository } from 'typeorm';
 import {
   SalesPage, SalesPagePaymentMode, SalesPageProductType,
@@ -7,8 +8,12 @@ import {
 } from '../../entities/sales-page.entity';
 import { User, UserStatus } from '../../entities/user.entity';
 import { MentorPaymentProvider, PaymentProviderType } from '../../entities/mentor-payment-provider.entity';
+import { Charge, ChargeMethod, ChargeStatus } from '../../entities/charge.entity';
+import { Trail } from '../../entities/trail.entity';
+import { TrailAccess, TrailAccessSource } from '../../entities/trail-access.entity';
 import { AiService } from '../ai/ai.service';
 import { LeadsService } from '../leads/leads.service';
+import { PurchaseLinksService } from './purchase-links.service';
 
 type SalesPageOutputFormat = 'blocks' | 'html';
 
@@ -98,8 +103,13 @@ export class SalesPagesService {
     @InjectRepository(SalesPage) private pages: Repository<SalesPage>,
     @InjectRepository(User) private users: Repository<User>,
     @InjectRepository(MentorPaymentProvider) private providers: Repository<MentorPaymentProvider>,
+    @InjectRepository(Charge) private charges: Repository<Charge>,
+    @InjectRepository(Trail) private trails: Repository<Trail>,
+    @InjectRepository(TrailAccess) private accesses: Repository<TrailAccess>,
     private ai: AiService,
     private leadsService: LeadsService,
+    private purchaseLinks: PurchaseLinksService,
+    @Inject(JwtService) private jwt: JwtService,
   ) {}
 
   // ==================== CRUD mentor ====================
@@ -132,6 +142,12 @@ export class SalesPagesService {
       slug,
       productType: dto.productType || SalesPageProductType.OTHER,
       productRefId: dto.productRefId,
+      upsellTrailId: dto.upsellTrailId || null,
+      upsellPriceCents: dto.upsellPriceCents ?? null,
+      upsellCurrency: dto.upsellCurrency || null,
+      upsellHeadline: dto.upsellHeadline || null,
+      upsellBody: dto.upsellBody || null,
+      upsellDelayMinutes: dto.upsellDelayMinutes ?? 0,
       headline: dto.headline,
       subheadline: dto.subheadline,
       description: dto.description,
@@ -175,6 +191,12 @@ export class SalesPagesService {
       slug,
       productType: source.productType,
       productRefId: source.productRefId,
+      upsellTrailId: source.upsellTrailId,
+      upsellPriceCents: source.upsellPriceCents,
+      upsellCurrency: source.upsellCurrency,
+      upsellHeadline: source.upsellHeadline,
+      upsellBody: source.upsellBody,
+      upsellDelayMinutes: source.upsellDelayMinutes,
       title: source.title,
       headline: source.headline,
       subheadline: source.subheadline,
@@ -227,6 +249,8 @@ export class SalesPagesService {
       'theme', 'seo', 'published', 'document', 'html',
       'template', 'forWho', 'notForWho', 'agenda', 'sections', 'about', 'eventInfo', 'urgencyText',
       'coupons', 'countdown',
+      'upsellTrailId', 'upsellPriceCents', 'upsellCurrency',
+      'upsellHeadline', 'upsellBody', 'upsellDelayMinutes',
     ];
     for (const k of editable) {
       if (dto[k] !== undefined) (p as any)[k] = k === 'document' ? validateDocument(dto[k]) : dto[k];
@@ -621,8 +645,9 @@ Gere o JSON agora.`;
     const chargeId = charge.id || charge.installment;
 
     // Vincula o comprador ao funil de leads (best-effort — nunca quebra o checkout).
+    let leadId: string | null = null;
     try {
-      await this.leadsService.createFromCapture({
+      const res = await this.leadsService.createFromCapture({
         mentorId: mentor.id,
         mentorBrand: mentor.brandName || mentor.name,
         name: dto.name,
@@ -632,9 +657,41 @@ Gere o JSON agora.`;
         salesPageId: page.id,
         salesPageSlug: page.slug,
       });
+      leadId = res.lead?.id || null;
     } catch (e: any) {
       this.logger.warn(`Checkout criou cobrança mas falhou ao vincular lead: ${e?.message}`);
     }
+
+    // Persiste a cobrança local. Este é o elo que faltava: sem linha de Charge o
+    // webhook Asaas saía em `if (!charge) return` e nada era liberado. O metadata
+    // carrega o que o webhook precisa para conceder o acesso.
+    const local = this.charges.create({
+      mentorId: mentor.id,
+      leadId: leadId || undefined,
+      description,
+      amount: value,
+      dueDate,
+      status: ChargeStatus.PENDING,
+      method: dto.billingType === 'CREDIT_CARD' ? ChargeMethod.CREDIT_CARD : ChargeMethod.PIX,
+      asaasChargeId: chargeId,
+      invoiceUrl: charge.invoiceUrl,
+      pixQrCode: charge.pixQrCode,
+      pixCopyPaste: charge.pixCopyPaste,
+      bankSlipUrl: charge.bankSlipUrl,
+      installmentNumber: charge.installmentNumber,
+      installmentTotal: charge.installmentTotal,
+      metadata: {
+        kind: 'sales-page',
+        salesPageId: page.id,
+        salesPageSlug: page.slug,
+        trailId: page.productRefId || null,
+        upsellTrailId: page.upsellTrailId || null,
+        leadId: leadId,
+        buyerEmail: dto.email,
+        buyerName: dto.name,
+      },
+    });
+    const savedCharge = await this.charges.save(local);
 
     // Marca uso do cupom (best-effort). Se der erro persistente, seguimos com a cobrança criada.
     if (appliedCoupon) {
@@ -668,10 +725,24 @@ Gere o JSON agora.`;
           payload: q.payload,
           qrImage: q.encodedImage ? `data:image/png;base64,${q.encodedImage}` : undefined,
         };
+        if (q.payload && !savedCharge.pixCopyPaste) {
+          savedCharge.pixCopyPaste = q.payload;
+          if (q.encodedImage) savedCharge.pixQrCode = `data:image/png;base64,${q.encodedImage}`;
+          await this.charges.save(savedCharge);
+        }
       } catch (e: any) {
         this.logger.warn(`Asaas pix qrcode falhou: ${e?.message}`);
       }
     }
+
+    // Link de uso único para o comprador cair direto na área de acesso assim que
+    // o pagamento for confirmado — sem depender do e-mail com as credenciais.
+    const access = await this.purchaseLinks.issue({
+      mentorId: mentor.id,
+      mentorSlug: mentor.slug,
+      leadId: leadId || undefined,
+      email: dto.email,
+    });
 
     return {
       ok: true,
@@ -685,6 +756,236 @@ Gere o JSON agora.`;
       invoiceUrl: charge.invoiceUrl || null,
       bankSlipUrl: charge.bankSlipUrl || null,
       pix,
+      accessUrl: access.url,
+      trailId: page.productRefId || null,
+      trailAccessGranted: false,
+      upsell: page.upsellTrailId && page.upsellPriceCents && page.upsellPriceCents >= 100
+        ? {
+            trailId: page.upsellTrailId,
+            priceCents: page.upsellPriceCents,
+            currency: page.upsellCurrency || page.currency,
+            headline: page.upsellHeadline || 'Quer ir além?',
+            body: page.upsellBody || null,
+            delayMinutes: page.upsellDelayMinutes || 0,
+          }
+        : null,
+    };
+  }
+
+  // ==================== Upsell interno (pós-pagamento) ====================
+  /**
+   * Cria a cobrança da oferta de upgrade apresentada logo após a compra.
+   * Segue o mesmo fluxo do checkout principal (cliente Asaas + charge + PIX),
+   * só que com o próprio PROSPECT já identificado e sem pedir dados de novo.
+   */
+  async upsellCheckout(mentorSlug: string, pageSlug: string, chargeId: string, dto: { name?: string; email?: string }) {
+    const mentor = await this.users.findOne({ where: { slug: mentorSlug, status: UserStatus.ACTIVE } });
+    if (!mentor) throw new NotFoundException('Mentor não encontrado');
+    const page = await this.pages.findOne({ where: { mentorId: mentor.id, slug: pageSlug } });
+    if (!page?.published) throw new NotFoundException('Página não encontrada');
+
+    const original = await this.charges.findOne({ where: { id: chargeId } });
+    if (!original) throw new NotFoundException('Compra original não encontrada');
+    if ((original.metadata as any)?.salesPageId !== page.id) {
+      throw new BadRequestException('Compra não pertence a esta página.');
+    }
+    if (original.status !== ChargeStatus.PAID) {
+      throw new BadRequestException('A compra original ainda não foi confirmada.');
+    }
+    if (!page.upsellTrailId || !page.upsellPriceCents || page.upsellPriceCents < 100) {
+      throw new BadRequestException('Upsell não configurado nesta página.');
+    }
+
+    const already = await this.charges
+      .createQueryBuilder('c')
+      .where('c.mentorId = :mentorId', { mentorId: mentor.id })
+      .andWhere(`c.metadata->>'kind' = 'sales-page-upsell'`)
+      .andWhere(`c.metadata->>'salesPageId' = :pageId`, { pageId: page.id })
+      .andWhere(`c.metadata->>'parentChargeId' = :parentId`, { parentId: original.id })
+      .getOne();
+    if (already) {
+      throw new BadRequestException('Upsell já adquirido para esta compra.');
+    }
+
+    const provider = await this.providers.findOne({
+      where: { mentorId: mentor.id, id: page.paymentProviderId!, type: PaymentProviderType.ASAAS },
+    });
+    if (!provider) throw new BadRequestException('Provedor de pagamento não encontrado.');
+    if (!provider.apiKey) throw new BadRequestException('API key Asaas ausente.');
+
+    const lead = original.leadId
+      ? await this.leadsService.getById(original.mentorId, original.leadId).catch(() => null)
+      : null;
+
+    const baseUrl = (provider as any).sandbox
+      ? 'https://sandbox.asaas.com/api/v3'
+      : 'https://api.asaas.com/api/v3';
+    const headers = { 'Content-Type': 'application/json', access_token: provider.apiKey } as any;
+
+    const customerPayload: any = {
+      name: dto.name || lead?.name || original.description,
+      email: dto.email || lead?.email || (original.metadata as any)?.buyerEmail,
+      cpfCnpj: (original.metadata as any)?.buyerCpf || undefined,
+      externalReference: `salespage-upsell:${page.id}`,
+    };
+    const customer = await fetch(`${baseUrl}/customers`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(customerPayload),
+    }).then((r) => r.json());
+    if (customer?.errors?.[0]?.description) {
+      throw new BadRequestException(customer.errors[0].description || 'Falha ao criar cliente Asaas.');
+    }
+
+    const description = `Upsell ${page.title} — trilha ${page.upsellTrailId}`;
+    const chargePayload: any = {
+      customer: customer.id,
+      billingType: 'PIX',
+      value: page.upsellPriceCents / 100,
+      dueDate: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+      description,
+      externalReference: `salespage-upsell:${page.id}:${original.asaasChargeId}`,
+    };
+    const charge = await fetch(`${baseUrl}/payments`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(chargePayload),
+    }).then((r) => r.json());
+    if (charge?.errors?.[0]?.description) {
+      throw new BadRequestException(charge.errors[0].description || 'Falha ao criar cobrança.');
+    }
+
+    const asaasChargeId = charge.id as string;
+    const local = this.charges.create({
+      mentorId: mentor.id,
+      leadId: original.leadId,
+      description,
+      amount: page.upsellPriceCents / 100,
+      dueDate: chargePayload.dueDate,
+      status: ChargeStatus.PENDING,
+      method: ChargeMethod.PIX,
+      asaasChargeId,
+      invoiceUrl: charge.invoiceUrl,
+      metadata: {
+        kind: 'sales-page-upsell',
+        salesPageId: page.id,
+        salesPageSlug: page.slug,
+        trailId: page.upsellTrailId,
+        leadId: original.leadId || (original.metadata as any)?.leadId || null,
+        parentChargeId: original.id,
+      },
+    });
+    const saved = await this.charges.save(local);
+
+    let pix: { payload?: string; qrImage?: string } | null = null;
+    try {
+      const q = await fetch(`${baseUrl}/payments/${asaasChargeId}/pixQrCode`, { headers }).then((r) => r.json());
+      pix = { payload: q.payload, qrImage: q.encodedImage ? `data:image/png;base64,${q.encodedImage}` : undefined };
+      saved.pixCopyPaste = q.payload || saved.pixCopyPaste;
+      if (q.encodedImage) saved.pixQrCode = `data:image/png;base64,${q.encodedImage}`;
+      await this.charges.save(saved);
+    } catch (e: any) {
+      this.logger.warn(`Upsell pix qrcode falhou: ${e?.message}`);
+    }
+
+    return {
+      ok: true,
+      chargeId: asaasChargeId,
+      localChargeId: saved.id,
+      status: 'PENDING',
+      value: page.upsellPriceCents / 100,
+      currency: page.upsellCurrency || 'BRL',
+      trailId: page.upsellTrailId,
+      invoiceUrl: charge.invoiceUrl || null,
+      pix,
+    };
+  }
+
+  /**
+   * Consulta o status de uma cobrança de página de vendas. Usado pelo comprador
+   * na tela de obrigado para detectar a aprovação e liberar o botão de acesso.
+   */
+  async chargeStatus(mentorSlug: string, pageSlug: string, chargeId: string) {
+    const mentor = await this.users.findOne({ where: { slug: mentorSlug, status: UserStatus.ACTIVE } });
+    if (!mentor) throw new NotFoundException('Mentor não encontrado');
+    const charge = await this.charges.findOne({
+      where: { mentorId: mentor.id, asaasChargeId: chargeId },
+    });
+    if (!charge) throw new NotFoundException('Cobrança não encontrada');
+    const meta = (charge.metadata as any) || {};
+    if (meta.salesPageSlug && meta.salesPageSlug !== pageSlug) {
+      throw new NotFoundException('Cobrança não encontrada');
+    }
+    return {
+      chargeId: charge.id,
+      asaasChargeId: charge.asaasChargeId,
+      status: charge.status,
+      paidAt: charge.paidAt,
+      trailId: (charge.metadata as any)?.trailId || null,
+    };
+  }
+
+  /**
+   * Troca o link de compra (`?tk=`) por uma sessão real de PROSPECT.
+   * O JWT de compra (aud `sales-page-checkout`) é validado pelo PurchaseLinksService;
+   * em seguida emitimos o mesmo payload do `auth.login`, com o brand do mentor,
+   * para o comprador cair na área de membro já autenticado — sem depender de e-mail.
+   */
+  async redeemAccessLink(token?: string) {
+    if (!token) throw new UnauthorizedException('Link de acesso ausente');
+    const link = await this.purchaseLinks.consume(token);
+    if (!link?.userId) throw new UnauthorizedException('Link de acesso inválido');
+
+    const user = await this.users.findOne({ where: { id: link.userId } });
+    if (!user) throw new UnauthorizedException('Usuário não encontrado');
+
+    const payload = {
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+      mentorId: user.mentorId,
+      parentMentorId: user.parentMentorId,
+      teamRole: user.teamRole,
+    };
+    const tenantMentorId = user.mentorId;
+    const mentor = tenantMentorId ? await this.users.findOne({ where: { id: tenantMentorId } }) : null;
+
+    return {
+      access_token: await this.jwt.signAsync(payload),
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        role: user.role,
+        slug: user.slug,
+        brandName: user.brandName,
+        brandLogoUrl: user.brandLogoUrl,
+        brandBannerUrl: user.brandBannerUrl,
+        brandMobileBannerUrl: user.brandMobileBannerUrl,
+        brandPrimaryColor: user.brandPrimaryColor,
+        brandAccentColor: user.brandAccentColor,
+        brandTheme: user.brandTheme,
+        brandHighlightTheme: user.brandHighlightTheme,
+        brandCoursesLayout: user.brandCoursesLayout,
+        brandDarkBannerUrl: user.brandDarkBannerUrl,
+        brandDarkLogoUrl: user.brandDarkLogoUrl,
+        customDomain: user.customDomain,
+        onboardingCompleted: user.onboardingCompleted,
+        mentorId: user.mentorId,
+        parentMentorId: user.parentMentorId,
+        teamRole: user.teamRole,
+        mustChangePassword: user.mustChangePassword,
+        tenantBrand: mentor
+          ? {
+              name: mentor.name,
+              brandName: mentor.brandName,
+              brandLogoUrl: mentor.brandLogoUrl,
+              brandPrimaryColor: mentor.brandPrimaryColor,
+              brandAccentColor: mentor.brandAccentColor,
+              brandTheme: mentor.brandTheme,
+            }
+          : null,
+      },
     };
   }
 }

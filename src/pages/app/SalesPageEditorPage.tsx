@@ -55,6 +55,12 @@ type SalesPage = {
   title: string;
   productType: string;
   productRefId?: string | null;
+  upsellTrailId?: string | null;
+  upsellPriceCents?: number | null;
+  upsellCurrency?: string | null;
+  upsellHeadline?: string | null;
+  upsellBody?: string | null;
+  upsellDelayMinutes?: number;
   headline?: string;
   subheadline?: string;
   description?: string;
@@ -106,6 +112,7 @@ export default function SalesPageEditorPage() {
   const { user } = useAuth();
   const [page, setPage] = useState<SalesPage | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
+  const [trails, setTrails] = useState<{ id: string; title: string }[]>([]);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
 
@@ -126,12 +133,14 @@ export default function SalesPageEditorPage() {
   useEffect(() => {
     (async () => {
       try {
-        const [p, provs] = await Promise.all([
+        const [p, provs, trs] = await Promise.all([
           api<SalesPage>(`/sales-pages/${id}`),
           api<Provider[]>(`/event-payments/providers`).catch(() => [] as Provider[]),
+          api<{ id: string; title: string }[]>(`/trails`).catch(() => [] as { id: string; title: string }[]),
         ]);
         setPage(p);
         setProviders((provs || []).filter((x) => x.type === "asaas"));
+        setTrails(trs || []);
       } catch (e: any) {
         toast.error(e.message);
         navigate("/app/sales-pages");
@@ -281,6 +290,7 @@ export default function SalesPageEditorPage() {
             <TabsTrigger value="longform">Versão completa</TabsTrigger>
           )}
           <TabsTrigger value="offer">Oferta</TabsTrigger>
+          <TabsTrigger value="upsell">Upsell pós-venda</TabsTrigger>
           <TabsTrigger value="faq">FAQ</TabsTrigger>
           <TabsTrigger value="checkout">Checkout</TabsTrigger>
         </TabsList>
@@ -922,6 +932,87 @@ export default function SalesPageEditorPage() {
                 </div>
               </div>
             )}
+          </Card>
+        </TabsContent>
+
+        {/* ===== Upsell pós-venda ===== */}
+        <TabsContent value="upsell">
+          <Card className="p-6 space-y-4">
+            <div>
+              <h3 className="font-bold mb-1">Oferta de upgrade pós-venda</h3>
+              <p className="text-sm text-muted-foreground mb-3">
+                Logo após a compra, o comprador pode receber uma oferta de uma trilha extra (ou do mesmo produto).
+                Se pagar, o acesso é liberado automaticamente na área de membro.
+              </p>
+            </div>
+
+            <div>
+              <Label>Trilha oferecida no upsell</Label>
+              <Select
+                value={page.upsellTrailId || ""}
+                onValueChange={(v) => patch({ upsellTrailId: v || null })}
+              >
+                <SelectTrigger><SelectValue placeholder="Selecione a trilha oferecida" /></SelectTrigger>
+                <SelectContent>
+                  {trails.map((t) => (
+                    <SelectItem key={t.id} value={t.id}>
+                      {t.title || t.id}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div>
+              <Label>Preço do upsell (centavos)</Label>
+              <Input
+                type="number"
+                value={page.upsellPriceCents ?? ""}
+                onChange={(e) => patch({ upsellPriceCents: e.target.value ? parseInt(e.target.value) : null })}
+                placeholder="Ex: 9700"
+              />
+            </div>
+
+            <div>
+              <Label>Moeda</Label>
+              <Input
+                value={page.upsellCurrency || "BRL"}
+                onChange={(e) => patch({ upsellCurrency: e.target.value.toUpperCase() })}
+                maxLength={3}
+              />
+            </div>
+
+            <div>
+              <Label>Headline da oferta</Label>
+              <Input
+                value={page.upsellHeadline || ""}
+                onChange={(e) => patch({ upsellHeadline: e.target.value })}
+                placeholder="Ex: Quer ir além? Acesse também a trilha avançada."
+              />
+            </div>
+
+            <div>
+              <Label>Descrição da oferta</Label>
+              <Textarea
+                rows={3}
+                value={page.upsellBody || ""}
+                onChange={(e) => patch({ upsellBody: e.target.value })}
+                placeholder="Detalhes do que o comprador ganha ao aceitar o upsell."
+              />
+            </div>
+
+            <div>
+              <Label>Delay antes de exibir (minutos)</Label>
+              <Input
+                type="number"
+                value={page.upsellDelayMinutes ?? 0}
+                onChange={(e) => patch({ upsellDelayMinutes: e.target.value ? parseInt(e.target.value) : 0 })}
+              />
+            </div>
+
+            <p className="text-xs text-muted-foreground">
+              Deixe a trilha vazia e o preço em branco para desativar o upsell nesta página.
+            </p>
           </Card>
         </TabsContent>
 
