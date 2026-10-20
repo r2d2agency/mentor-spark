@@ -3,10 +3,18 @@ import {
 } from 'typeorm';
 
 export enum SalesPageProductType {
+  /** Curso interno da plataforma (trilha) — EAD. */
   ACADEMY_COURSE = 'academy_course',
   MENTORSHIP = 'mentorship',
   EBOOK = 'ebook',
+  /** Evento genérico (presencial ou online). */
   EVENT = 'event',
+  /** Evento ao vivo online. */
+  EVENT_ONLINE = 'event_online',
+  /** Evento presencial. */
+  EVENT_PRESENTIAL = 'event_presencial',
+  /** Curso online gravado (EAD) vendido avulso. */
+  COURSE_ONLINE = 'course_online',
   OTHER = 'other',
 }
 
@@ -142,6 +150,20 @@ export class SalesPage {
   /** ID opcional do curso Academy / mentoria / evento vinculado (para liberar acesso via webhook). */
   @Column({ type: 'uuid', nullable: true })
   productRefId?: string;
+
+  /**
+   * Libera a matrícula (cadastro) automaticamente assim que o pagamento for aprovado.
+   * Só tem efeito quando existe um conteúdo/curso vinculado em `productRefId`.
+   */
+  @Column({ type: 'boolean', default: true })
+  autoEnrollOnPayment: boolean;
+
+  /**
+   * Ao aprovar o pagamento, promove o comprador de PROSPECT para MENTORADO
+   * (aluno cadastrado na área de membro do mentor).
+   */
+  @Column({ type: 'boolean', default: true })
+  enrollAsMentorado: boolean;
 
   // ---- Conteúdo ----
   @Column()

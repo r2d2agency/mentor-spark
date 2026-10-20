@@ -7,8 +7,8 @@ import { TrailLesson } from '../../entities/trail-lesson.entity';
 import { TrailProgress } from '../../entities/trail-progress.entity';
 import { TrailAccess, TrailAccessSource } from '../../entities/trail-access.entity';
 import { TrailAccessRequest, TrailAccessRequestStatus } from '../../entities/trail-access-request.entity';
-import { Lead } from '../../entities/lead.entity';
-import { User } from '../../entities/user.entity';
+import { Lead, LeadStage } from '../../entities/lead.entity';
+import { User, UserRole, UserStatus } from '../../entities/user.entity';
 import { Charge, ChargeStatus, ChargeMethod } from '../../entities/charge.entity';
 import { AccessGroupsService } from '../access-groups/access-groups.service';
 import { NotificationsService } from '../notifications/notifications.service';
@@ -394,17 +394,80 @@ export class TrailAccessService {
     const trailId: string | null = meta.trailId || meta.productRefId || null;
     const leadId: string | null = meta.leadId || charge.leadId || null;
     const mentorId: string = charge.mentorId;
-    if (!trailId || !leadId) return;
+    if (!leadId) return;
 
     const lead = await this.leads.findOne({ where: { id: leadId, mentorId } });
     if (!lead) return;
-    const trail = await this.trails.findOne({ where: { id: trailId, mentorId } });
-    if (!trail) {
-      this.logger.warn(`grantSalesPageAccess: trilha ${trailId} não existe no mentor ${mentorId}`);
-      return;
+
+    // Liberação da matrícula: o comprador vira aluno (MENTORADO) do mentor e o
+    // lead sai de PROSPECT para CLIENT. É o que o usuário chama de "liberar o
+    // cadastro assim que aprovar".
+    const autoEnroll = meta.autoEnroll !== false;
+    const asMentorado = meta.enrollAsMentorado !== false;
+
+    if (trailId) {
+      const trail = await this.trails.findOne({ where: { id: trailId, mentorId } });
+      if (!trail) {
+        this.logger.warn(`grantSalesPageAccess: trilha ${trailId} não existe no mentor ${mentorId}`);
+      } else {
+        await this.grantOverride(mentorId, trailId, leadId, TrailAccessSource.PAYMENT, charge.id);
+        if (autoEnroll) {
+          await this.recordEnrollment(mentorId, trailId, leadId, charge);
+        }
+      }
     }
 
-    await this.grantOverride(mentorId, trailId, leadId, TrailAccessSource.PAYMENT, charge.id);
+    if (autoEnroll && asMentorado) {
+      await this.promoteToMentorado(mentorId, lead);
+    }
+  }
+
+  /**
+   * Registra a matrícula do comprador como uma solicitação paga — o mentor passa
+   * a enxergar a inscrição na lista de solicitações, e o histórico fica amarrado
+   * à cobrança que a originou.
+   */
+  private async recordEnrollment(mentorId: string, trailId: string, leadId: string, charge: Charge) {
+    try {
+      const existing = await this.requests.findOne({ where: { mentorId, trailId, leadId, chargeId: charge.id } });
+      if (existing) return;
+      await this.requests.save(this.requests.create({
+        mentorId,
+        trailId,
+        leadId,
+        status: TrailAccessRequestStatus.PAID,
+        message: 'Matrícula liberada automaticamente pelo pagamento da landing page.',
+        chargeId: charge.id,
+        amountCents: charge.amount ?? undefined,
+        resolvedAt: new Date(),
+      }));
+    } catch (e: any) {
+      this.logger.warn(`recordEnrollment falhou: ${e?.message}`);
+    }
+  }
+
+  /**
+   * Promove o usuário PROSPECT para MENTORADO e o lead para CLIENT — o comprador
+   * passa a ser aluno cadastrado na área de membro do mentor.
+   */
+  private async promoteToMentorado(mentorId: string, lead: Lead) {
+    try {
+      if (lead.userId) {
+        const user = await this.users.findOne({ where: { id: lead.userId } });
+        if (user && (user.role === UserRole.PROSPECT || user.role === UserRole.MENTORADO)) {
+          await this.users.update(user.id, {
+            role: UserRole.MENTORADO,
+            status: UserStatus.ACTIVE,
+            mentorId: user.mentorId || mentorId,
+          });
+        }
+      }
+      if (lead.stage !== LeadStage.CLIENT) {
+        await this.leads.update(lead.id, { stage: LeadStage.CLIENT });
+      }
+    } catch (e: any) {
+      this.logger.warn(`promoteToMentorado falhou: ${e?.message}`);
+    }
   }
 
   /** Upsert de override de acesso + notificação para o comprador. */

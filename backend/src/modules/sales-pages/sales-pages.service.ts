@@ -142,6 +142,8 @@ export class SalesPagesService {
       slug,
       productType: dto.productType || SalesPageProductType.OTHER,
       productRefId: dto.productRefId,
+      autoEnrollOnPayment: dto.autoEnrollOnPayment !== false,
+      enrollAsMentorado: dto.enrollAsMentorado !== false,
       upsellTrailId: dto.upsellTrailId || null,
       upsellPriceCents: dto.upsellPriceCents ?? null,
       upsellCurrency: dto.upsellCurrency || null,
@@ -191,6 +193,8 @@ export class SalesPagesService {
       slug,
       productType: source.productType,
       productRefId: source.productRefId,
+      autoEnrollOnPayment: source.autoEnrollOnPayment,
+      enrollAsMentorado: source.enrollAsMentorado,
       upsellTrailId: source.upsellTrailId,
       upsellPriceCents: source.upsellPriceCents,
       upsellCurrency: source.upsellCurrency,
@@ -242,7 +246,7 @@ export class SalesPagesService {
       p.slug = await this.ensureUniqueSlug(mentorId, dto.slug, p.id);
     }
     const editable: (keyof SalesPage)[] = [
-      'title', 'productType', 'productRefId', 'headline', 'subheadline', 'description',
+      'title', 'productType', 'productRefId', 'autoEnrollOnPayment', 'enrollAsMentorado', 'headline', 'subheadline', 'description',
       'heroImageUrl', 'videoUrl', 'features', 'faqs', 'testimonials', 'badges',
       'guaranteeText', 'ctaText', 'priceCents', 'currency', 'originalPriceCents',
       'maxInstallments', 'paymentMode', 'subscriptionCycle', 'paymentProviderId',
@@ -685,6 +689,10 @@ Gere o JSON agora.`;
         salesPageId: page.id,
         salesPageSlug: page.slug,
         trailId: page.productRefId || null,
+        productRefId: page.productRefId || null,
+        productType: page.productType,
+        autoEnroll: page.autoEnrollOnPayment !== false,
+        enrollAsMentorado: page.enrollAsMentorado !== false,
         upsellTrailId: page.upsellTrailId || null,
         leadId: leadId,
         buyerEmail: dto.email,

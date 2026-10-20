@@ -55,6 +55,8 @@ type SalesPage = {
   title: string;
   productType: string;
   productRefId?: string | null;
+  autoEnrollOnPayment?: boolean;
+  enrollAsMentorado?: boolean;
   upsellTrailId?: string | null;
   upsellPriceCents?: number | null;
   upsellCurrency?: string | null;
@@ -882,6 +884,96 @@ export default function SalesPageEditorPage() {
             <div>
               <Label>Texto do botão (CTA)</Label>
               <Input value={page.ctaText} onChange={(e) => patch({ ctaText: e.target.value })} />
+            </div>
+          </Card>
+
+          <Card className="p-6 space-y-4">
+            <div>
+              <h3 className="font-bold mb-1">Tipo de produto e liberação da matrícula</h3>
+              <p className="text-sm text-muted-foreground">
+                Defina o que está sendo vendido e o que acontece quando o pagamento for aprovado.
+                Para cursos internos (EAD) e eventos, vincule o conteúdo da trilha — é ele que
+                libera o acesso do comprador automaticamente.
+              </p>
+            </div>
+
+            <div className="grid md:grid-cols-2 gap-4">
+              <div>
+                <Label>Tipo de produto</Label>
+                <Select value={page.productType || "other"} onValueChange={(v) => patch({ productType: v })}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="academy_course">Curso interno (EAD) — trilha da plataforma</SelectItem>
+                    <SelectItem value="course_online">Curso online gravado (EAD)</SelectItem>
+                    <SelectItem value="event_online">Evento online (ao vivo)</SelectItem>
+                    <SelectItem value="event_presencial">Evento presencial</SelectItem>
+                    <SelectItem value="event">Evento</SelectItem>
+                    <SelectItem value="mentorship">Mentoria</SelectItem>
+                    <SelectItem value="ebook">E-book</SelectItem>
+                    <SelectItem value="other">Outro</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Curso interno / trilha liberada</Label>
+                <Select
+                  value={page.productRefId || "none"}
+                  onValueChange={(v) => patch({ productRefId: v === "none" ? null : v })}
+                >
+                  <SelectTrigger><SelectValue placeholder="Selecione a trilha" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Nenhum — não liberar trilha</SelectItem>
+                    {trails.map((t) => (
+                      <SelectItem key={t.id} value={t.id}>{t.title || t.id}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground mt-1">
+                  É a trilha (curso interno) que o comprador recebe liberado na aprovação do pagamento.
+                </p>
+              </div>
+            </div>
+
+            <div className="border-t pt-4 space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <h3 className="font-bold mb-1">Liberar matrícula automaticamente na aprovação</h3>
+                  <p className="text-sm text-muted-foreground">
+                    Quando o pagamento for aprovado, o cadastro do comprador é liberado na hora:
+                    ele entra como aluno (mentorado), a matrícula é registrada e a trilha
+                    escolhida acima fica acessível.
+                  </p>
+                </div>
+                <label className="inline-flex items-center gap-2 cursor-pointer shrink-0">
+                  <input
+                    type="checkbox"
+                    className="h-5 w-5 accent-primary"
+                    checked={page.autoEnrollOnPayment !== false}
+                    onChange={(e) => patch({ autoEnrollOnPayment: e.target.checked })}
+                  />
+                  <span className="text-sm font-medium">{page.autoEnrollOnPayment !== false ? "Ativa" : "Desativada"}</span>
+                </label>
+              </div>
+
+              {page.autoEnrollOnPayment !== false && (
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="font-bold mb-1">Promover comprador para aluno (mentorado)</h3>
+                    <p className="text-sm text-muted-foreground">
+                      Converte o cadastro do comprador de prospect para aluno do mentor na área de membro.
+                    </p>
+                  </div>
+                  <label className="inline-flex items-center gap-2 cursor-pointer shrink-0">
+                    <input
+                      type="checkbox"
+                      className="h-5 w-5 accent-primary"
+                      checked={page.enrollAsMentorado !== false}
+                      onChange={(e) => patch({ enrollAsMentorado: e.target.checked })}
+                    />
+                    <span className="text-sm font-medium">{page.enrollAsMentorado !== false ? "Ativa" : "Desativada"}</span>
+                  </label>
+                </div>
+              )}
             </div>
           </Card>
 
