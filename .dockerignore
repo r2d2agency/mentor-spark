@@ -1,9 +1,20 @@
+# Contexto Docker da raiz do repo (usado pelo Dockerfile do frontend e pelo
+# Dockerfile do backend quando o Build Path é a raiz).
 node_modules
+**/node_modules
 dist
+**/dist
+dist-ssr
+**/dist-ssr
 .git
-.github
-.vscode
-.lovable
-backend/node_modules
-backend/dist
-backend/.env
+.gitignore
+**/.env
+**/.env.*
+!.env.example
+**/.env.example
+sites
+uploads
+**/sites
+**/uploads
+**/*.tsbuildinfo
+**/.DS_Store
