@@ -58,6 +58,14 @@ async function bootstrap() {
   app.getHttpAdapter().getInstance().set('trust proxy', 1);
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: false }));
 
+  // Health check na raiz. O orquestrador (EasyPanel) sonda a porta exposta e,
+  // sem resposta 2xx na raiz, marca o container como unhealthy — o proxy passa
+  // a responder 502 em todas as rotas com a aplicação no ar. Registrado direto
+  // no Express porque o prefixo global `/api` não alcança rotas soltas.
+  app.getHttpAdapter().getInstance().get('/', (_req: any, res: any) => {
+    res.status(200).json({ status: 'ok', service: 'mentorflow-api', timestamp: new Date().toISOString() });
+  });
+
   const config = new DocumentBuilder()
     .setTitle('MentorFlow API')
     .setDescription('SaaS de Mentoria Inteligente Multi-Tenant')
