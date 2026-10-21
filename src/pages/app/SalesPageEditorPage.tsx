@@ -294,7 +294,7 @@ export default function SalesPageEditorPage() {
         {/* `flex-wrap`: com 9 abas a lista estourava a largura e a última
             ("Página HTML (ZIP)") ficava fora da tela, sem rolagem. */}
         <TabsList className="flex-wrap h-auto">
-          <TabsTrigger value="ai"><Sparkles class="h-3 w-3 mr-1" />Gerar com IA</TabsTrigger>
+          <TabsTrigger value="ai"><Sparkles className="h-3 w-3 mr-1" />Gerar com IA</TabsTrigger>
           <TabsTrigger value="design">Design</TabsTrigger>
           <TabsTrigger value="content">Conteúdo</TabsTrigger>
           {page.template === "long_form" && (
