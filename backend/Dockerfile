@@ -34,7 +34,8 @@ ENV NODE_ENV=production
 # já normalizado para a pasta backend/)
 COPY --from=builder /app/package.json ./
 COPY --from=builder /app/package-lock.json ./
-RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
+RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force \
+ && node -e "const fs=require('fs');const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.scripts.start='/usr/local/bin/docker-entrypoint.sh';fs.writeFileSync('package.json',JSON.stringify(p,null,2))"
 
 # Copia build (inclui dist/main.js e dist/seeds/bootstrap.js compilados)
 COPY --from=builder /app/dist ./dist

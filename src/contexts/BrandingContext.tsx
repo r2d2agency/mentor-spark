@@ -169,7 +169,10 @@ export function BrandingProvider({ children }: { children: ReactNode }) {
          setBrand(null);
        }
      } catch (err) {
-       console.error("Erro ao carregar branding do host:", err);
+       // A API fora do ar (502/CORS) não deve poluir o console a cada carga de
+       // página — o usuário não pode corrigir isso e o erro mascarava o
+       // diagnóstico real. O branding cai no default e o app segue.
+       console.warn("Branding indisponível (API fora do ar?):", err instanceof Error ? err.message : err);
        setBrand(null);
      } finally {
        setLoading(false);
