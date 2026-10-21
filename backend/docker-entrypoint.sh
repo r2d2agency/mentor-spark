@@ -24,10 +24,11 @@ while :; do
 
   if [ "$ATTEMPT" -ge "$MAX_TRIES" ]; then
     echo "════════════════════════════════════════════════════════"
-    echo "[entrypoint] ❌ BOOTSTRAP FALHOU após $ATTEMPT tentativas — abortando"
+    echo "[entrypoint] ❌ BOOTSTRAP FALHOU após $ATTEMPT tentativas"
     echo "[entrypoint] Verifique as envs DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME"
+    echo "[entrypoint] Seguindo assim mesmo: a API tem retry próprio de conexão ao banco."
     echo "════════════════════════════════════════════════════════"
-    exit 1
+    break
   fi
 
   echo "[entrypoint] ⚠️  Bootstrap falhou (tentativa $ATTEMPT/$MAX_TRIES). Banco indisponível? Tentando de novo em 10s..."
@@ -37,4 +38,15 @@ done
 
 echo ""
 echo "[entrypoint] 🚀 Subindo API..."
-exec node dist/main.js
+
+# Supervisor: se a API cair por qualquer motivo (exceção não tratada, OOM,
+# banco reiniciando), o processo volta em vez de deixar o container morto —
+# com o container parado o proxy responde 502 em todas as rotas.
+RESTART_DELAY="${API_RESTART_DELAY_SECONDS:-5}"
+while :; do
+  code=0
+  # `set -e` abortaria o script num exit != 0; o `|| code=$?` mantém o supervisor vivo.
+  node dist/main.js || code=$?
+  echo "[entrypoint] ⚠️  API terminou com código $code — reiniciando em ${RESTART_DELAY}s"
+  sleep "$RESTART_DELAY"
+done

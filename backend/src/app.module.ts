@@ -57,6 +57,12 @@ import { buildPgOptions } from './db.config';
     TypeOrmModule.forRoot({
       ...buildPgOptions(),
       autoLoadEntities: true,
+      // Sem retry, um Postgres frio/lento no boot mata o Nest na hora: o
+      // container sai com código != 0, o orquestrador marca como unhealthy e o
+      // proxy responde 502 em todas as rotas. O bootstrap já tem retry, mas o
+      // processo da API precisa ter o mesmo弹药 de espera.
+      retryAttempts: +(process.env.DB_RETRY_ATTEMPTS || 30),
+      retryDelay: +(process.env.DB_RETRY_DELAY_MS || 5000),
       // synchronize cria/atualiza tabelas automaticamente no boot.
       // Default: TRUE (até termos migrations). Para desligar: DB_SYNCHRONIZE=false
       synchronize: process.env.DB_SYNCHRONIZE !== 'false',
