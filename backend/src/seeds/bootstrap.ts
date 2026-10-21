@@ -9,12 +9,82 @@
 import 'reflect-metadata';
 import * as dotenv from 'dotenv';
 import * as bcrypt from 'bcryptjs';
+import * as net from 'net';
 import { DataSource, DataSourceOptions } from 'typeorm';
 import { buildPgOptions } from '../db.config';
 import { User, UserRole, UserStatus } from '../entities/user.entity';
 import { Plan } from '../entities/plan.entity';
 
 dotenv.config();
+
+/**
+ * Diagnostico do alvo do Postgres.
+ *
+ * O log de boot e a unica fonte de verdade quando o container morre no
+ * EasyPanel (a API nunca abre a porta e o proxy devolve 502 em tudo).
+ * Sem isto, a unica pista e um "ECONNREFUSED" generico que nao diz se o
+ * problema e nome de servico, porta, senha ou banco inexistente.
+ */
+function describeDbTarget(): { host: string; port: number; source: string } {
+  const url = process.env.DATABASE_URL;
+  if (url) {
+    try {
+      const u = new URL(url);
+      return { host: u.hostname, port: +(u.port || 5432), source: 'DATABASE_URL' };
+    } catch {
+      return { host: '(DATABASE_URL invalida)', port: 5432, source: 'DATABASE_URL' };
+    }
+  }
+  return {
+    host: process.env.DB_HOST || 'localhost',
+    port: +(process.env.DB_PORT || 5432),
+    source: 'DB_HOST/DB_PORT',
+  };
+}
+
+/** Traduz o erro do driver em algo que aponta a causa raiz. */
+function describeDbError(e: any): string {
+  const code = e?.code || e?.driverError?.code || '';
+  const msg = String(e?.message || e);
+  if (code === '28P01' || /password authentication failed/i.test(msg)) {
+    return `senha invalida para o usuario (${code}) - confira DB_PASSWORD/DB_USER`;
+  }
+  if (code === '28000' || /role .* does not exist/i.test(msg)) {
+    return `usuario/role inexistente (${code}) - confira DB_USER`;
+  }
+  if (code === '3D000' || /database .* does not exist/i.test(msg)) {
+    return `banco inexistente (${code}) - confira DB_NAME`;
+  }
+  if (code === 'ECONNREFUSED') {
+    return 'conexao recusada - o Postgres nao esta no ar, ou host/porta apontam para o lugar errado';
+  }
+  if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') {
+    return 'host nao resolvido - o nome do servico de banco no EasyPanel esta errado?';
+  }
+  if (code === 'ETIMEDOUT') {
+    return 'timeout de conexao - firewall ou banco travado';
+  }
+  return code ? `${code}: ${msg}` : msg;
+}
+
+/** Testa o TCP do banco sem autenticar: separa "nao achou o banco" de "senha errada". */
+function tcpProbe(host: string, port: number, timeoutMs = 4000): Promise<{ ok: boolean; reason?: string }> {
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    let settled = false;
+    const finish = (r: { ok: boolean; reason?: string }) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve(r);
+    };
+    socket.setTimeout(timeoutMs);
+    socket.once('connect', () => finish({ ok: true }));
+    socket.once('timeout', () => finish({ ok: false, reason: 'timeout' }));
+    socket.once('error', (err: any) => finish({ ok: false, reason: err.code || err.message }));
+    socket.connect(port, host);
+  });
+}
 
 async function waitForDb(opts: DataSourceOptions, maxTries = 30, delayMs = 2000) {
   for (let i = 1; i <= maxTries; i++) {
@@ -25,7 +95,7 @@ async function waitForDb(opts: DataSourceOptions, maxTries = 30, delayMs = 2000)
       console.log(`[bootstrap] Postgres pronto (tentativa ${i})`);
       return;
     } catch (e: any) {
-      console.log(`[bootstrap] Postgres indisponível (${i}/${maxTries}): ${e.code || e.message}`);
+      console.log(`[bootstrap] Postgres indisponível (${i}/${maxTries}): ${describeDbError(e)}`);
       try { await probe.destroy(); } catch {}
       await new Promise((r) => setTimeout(r, delayMs));
     }
@@ -40,6 +110,16 @@ async function run() {
     migrations: [__dirname + '/../migrations/*{.ts,.js}'],
     logging: process.env.DB_LOGGING === 'true',
   } as DataSourceOptions;
+
+  const target = describeDbTarget();
+  console.log(`[bootstrap] Alvo do Postgres: ${target.host}:${target.port} (via ${target.source})`);
+  const tcp = await tcpProbe(target.host, target.port);
+  if (!tcp.ok) {
+    console.log(`[bootstrap] ATENCAO: TCP inacessivel em ${target.host}:${target.port} - ${tcp.reason}`);
+    console.log('[bootstrap] Se o banco roda em outro servico do EasyPanel, confira o NOME do servico e as envs DB_HOST/DB_PORT (ou DATABASE_URL) deste servico.');
+  } else {
+    console.log(`[bootstrap] TCP OK em ${target.host}:${target.port} - banco alcancavel, autenticando...`);
+  }
 
   await waitForDb(baseOpts);
 
