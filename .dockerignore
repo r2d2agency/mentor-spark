@@ -12,9 +12,27 @@ dist-ssr
 **/.env.*
 !.env.example
 **/.env.example
-sites
-uploads
-**/sites
-**/uploads
 **/*.tsbuildinfo
 **/.DS_Store
+
+# Dados de runtime (página HTML em ZIP e arquivos de upload) — ficam fora da
+# imagem.
+#
+# IMPORTANTE: os padrões sem âncora (`sites`, `uploads`, `**/sites`,
+# `**/uploads`) casavam em QUALQUER nível e apagavam
+# `backend/src/modules/sites/` e `backend/src/modules/uploads/` — que são
+# CÓDIGO, não dados. Como o `app.module.ts` importa `SitesModule`, o `nest
+# build` dentro da imagem quebrava com MODULE_NOT_FOUND, a imagem nunca era
+# construída e o EasyPanel respondia 502 em todas as rotas da API (inclusive
+# o login). O guard `backend/scripts/check-docker-context.js` falha o build
+# se isso voltar a acontecer.
+#
+# Os caminhos de dados ficam explícitos e ancorados na raiz do contexto:
+/sites
+/uploads
+/backend/sites
+/backend/uploads
+
+# O guard de contexto precisa chegar ao build. Se ele sumir do contexto, a
+# imagem quebraria sem diagnostico (ver backend/Dockerfile).
+!backend/scripts/check-docker-context.js

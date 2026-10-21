@@ -7,3 +7,6 @@ uploads
 *.tsbuildinfo
 Dockerfile
 docker-compose.yml
+
+# O guard de contexto precisa chegar ao build (ver backend/Dockerfile).
+!scripts/check-docker-context.js

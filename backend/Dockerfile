@@ -21,6 +21,19 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
 COPY . /tmp/context
+# Guard de contexto: falha o build se o .dockerignore excluir codigo do
+# backend do contexto. Foi exatamente isso que quebrou a imagem e deixou a
+# API em 502 em todas as rotas (MODULE_NOT_FOUND no `nest build`).
+# Roda antes do build porque depois do build a imagem ja esta quebrada.
+RUN set -e; \
+    if [ -f /tmp/context/backend/scripts/check-docker-context.js ]; then \
+      node /tmp/context/backend/scripts/check-docker-context.js /tmp/context; \
+    elif [ -f /tmp/context/scripts/check-docker-context.js ]; then \
+      node /tmp/context/scripts/check-docker-context.js /tmp/context; \
+    else \
+      echo '[ctx] FALHA: guard de contexto ausente do build context'; \
+      exit 1; \
+    fi
 RUN if [ -f /tmp/context/backend/package.json ]; then \
       cp -a /tmp/context/backend/. /app/; \
     else \
