@@ -1,13 +1,102 @@
 import { NestFactory } from '@nestjs/core';
-import { ValidationPipe, Logger } from '@nestjs/common';
+import { ValidationPipe, Logger, INestApplication } from '@nestjs/common';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { IoAdapter } from '@nestjs/platform-socket.io';
+import * as http from 'http';
+
+const logger = new Logger('Bootstrap');
+
+/**
+ * Modo degradado: a API sobe MESMO sem banco de dados.
+ *
+ * Sem isto, uma falha de conexão com o Postgres no boot mata o Nest com
+ * `process.abort()` (SIGABRT) ANTES de a porta abrir. O orquestrador marca o
+ * container como unhealthy e o proxy responde 502 em TODAS as rotas — inclusive
+ * na de health check — sem nenhuma pista do motivo real.
+ *
+ * Em modo degradado a porta abre, o health check responde 200 e as rotas /api
+ * devolvem 503 com o motivo da falha (visível no console do navegador, sem
+ * precisar de acesso ao log do EasyPanel). O processo sai depois de alguns
+ * segundos para o entrypoint reiniciá-lo e tentar subir de novo — o banco pode
+ * ter voltado nesse meio-tempo.
+ */
+async function startDegradedServer(port: number, cause: unknown): Promise<never> {
+  const reason = cause instanceof Error ? cause.message || cause.name : String(cause);
+  const retryIn = +(process.env.DEGRADED_RETRY_SECONDS || 30);
+
+  const server = http.createServer((req, res) => {
+    const url = (req.url || '/').split('?')[0];
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json; charset=utf-8',
+      // CORS liberado no modo degradado: sem ele o navegador reporta
+      // "TypeError: Failed to fetch" em vez do 503 com o motivo real.
+      'Access-Control-Allow-Origin': req.headers.origin || '*',
+      'Access-Control-Allow-Credentials': 'true',
+      'Access-Control-Allow-Methods': 'GET,POST,PUT,PATCH,DELETE,OPTIONS',
+      'Access-Control-Allow-Headers':
+        (req.headers['access-control-request-headers'] as string) ||
+        'Content-Type, Authorization, Accept, X-Requested-With, X-Tenant-Id',
+      'Access-Control-Max-Age': '86400',
+    };
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, headers);
+      res.end();
+      return;
+    }
+
+    if (url === '/' || url === '/api/health') {
+      res.writeHead(200, headers);
+      res.end(
+        JSON.stringify({
+          status: 'degraded',
+          service: 'mentorflow-api',
+          reason,
+          timestamp: new Date().toISOString(),
+        }),
+      );
+      return;
+    }
+
+    res.writeHead(503, headers);
+    res.end(
+      JSON.stringify({
+        statusCode: 503,
+        error: 'Service Unavailable',
+        message: `API em modo degradado: ${reason}`,
+        timestamp: new Date().toISOString(),
+      }),
+    );
+  });
+
+  await new Promise<void>((resolve) => server.listen(port, resolve));
+  logger.warn(`API em MODO DEGRADADO na porta ${port}: ${reason}`);
+  logger.warn(`Rotas /api respondem 503. Saindo em ${retryIn}s para o entrypoint reiniciar e tentar subir de novo.`);
+
+  await new Promise((resolve) => setTimeout(resolve, retryIn * 1000));
+  process.exit(1);
+}
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, { cors: false, rawBody: true });
-  const logger = new Logger('Bootstrap');
+  const port = +(process.env.PORT || 3001);
+
+  let app: INestApplication;
+  try {
+    app = await NestFactory.create(AppModule, {
+      cors: false,
+      rawBody: true,
+      // Padrão do Nest é abortOnError:true — em qualquer falha de init ele chama
+      // process.abort() (SIGABRT) e o erro NUNCA chega no catch. Com false, a
+      // falha vira uma rejeição normal e podemos cair no modo degradado.
+      abortOnError: false,
+    });
+  } catch (e: any) {
+    logger.error(`Falha ao iniciar a API: ${e?.message || e}`);
+    if (e?.stack) logger.error(e.stack);
+    return startDegradedServer(port, e);
+  }
 
   app.useWebSocketAdapter(new IoAdapter(app));
   app.use(helmet({ crossOriginResourcePolicy: false, crossOriginOpenerPolicy: false }));
@@ -75,7 +164,6 @@ async function bootstrap() {
   const doc = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('api/docs', app, doc);
 
-  const port = +(process.env.PORT || 3001);
   await app.listen(port);
   logger.log(`MentorFlow API on http://localhost:${port}/api`);
   logger.log(`Swagger docs on http://localhost:${port}/api/docs`);

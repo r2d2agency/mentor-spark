@@ -86,7 +86,7 @@ function tcpProbe(host: string, port: number, timeoutMs = 4000): Promise<{ ok: b
   });
 }
 
-async function waitForDb(opts: DataSourceOptions, maxTries = 30, delayMs = 2000) {
+async function waitForDb(opts: DataSourceOptions, maxTries = 15, delayMs = 2000) {
   for (let i = 1; i <= maxTries; i++) {
     const probe = new DataSource(opts);
     try {

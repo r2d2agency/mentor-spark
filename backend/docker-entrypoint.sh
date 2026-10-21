@@ -12,7 +12,7 @@ echo ""
 # O banco pode não estar pronto logo após o deploy (ou reiniciar). Sem retry,
 # o bootstrap falha uma vez, o entrypoint aborta, o container entra em crash
 # loop e a API fica em 502 permanente. Aqui tentamos de novo algumas vezes.
-MAX_TRIES="${BOOTSTRAP_MAX_TRIES:-10}"
+MAX_TRIES="${BOOTSTRAP_MAX_TRIES:-3}"
 ATTEMPT=1
 
 echo "[entrypoint] 🛠  Rodando bootstrap (schema + super admin + planos)..."
@@ -31,9 +31,9 @@ while :; do
     break
   fi
 
-  echo "[entrypoint] ⚠️  Bootstrap falhou (tentativa $ATTEMPT/$MAX_TRIES). Banco indisponível? Tentando de novo em 10s..."
+  echo "[entrypoint] ⚠️  Bootstrap falhou (tentativa $ATTEMPT/$MAX_TRIES). Banco indisponível? Tentando de novo em 5s..."
   ATTEMPT=$((ATTEMPT + 1))
-  sleep 10
+  sleep 5
 done
 
 echo ""

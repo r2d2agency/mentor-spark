@@ -60,8 +60,12 @@ import { buildPgOptions } from './db.config';
       // Sem retry, um Postgres frio/lento no boot mata o Nest na hora: o
       // container sai com código != 0, o orquestrador marca como unhealthy e o
       // proxy responde 502 em todas as rotas. O bootstrap já tem retry, mas o
-      // processo da API precisa ter o mesmo弹药 de espera.
-      retryAttempts: +(process.env.DB_RETRY_ATTEMPTS || 30),
+      // processo da API precisa ter a mesma munição de espera.
+      //
+      // Janela curta de propósito (6 x 5s = 30s): passado isso, a API cai no
+      // modo degradado (porta aberta, 503 com o motivo real) em vez de ficar
+      // invisível atrás do health check.
+      retryAttempts: +(process.env.DB_RETRY_ATTEMPTS || 6),
       retryDelay: +(process.env.DB_RETRY_DELAY_MS || 5000),
       // synchronize cria/atualiza tabelas automaticamente no boot.
       // Default: TRUE (até termos migrations). Para desligar: DB_SYNCHRONIZE=false
