@@ -44,4 +44,10 @@ COPY --from=builder /app/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.s
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 3001
+
+# Health check: o orquestrador usa isto para decidir se o container está
+# pronto. A rota / responde 200 sem tocar o banco.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+  CMD node -e "require('http').get('http://127.0.0.1:'+(process.env.PORT||3001)+'/',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
