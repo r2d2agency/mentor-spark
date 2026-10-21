@@ -4,7 +4,7 @@ import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, ExternalLink, Copy, Trash2, Sparkles, Loader2 } from "lucide-react";
+import { Plus, ExternalLink, Copy, Trash2, Sparkles, Loader2, FileCode2 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 
@@ -75,11 +75,23 @@ export default function SalesPagesListPage() {
     }
   };
 
-  const createFromTemplate = async () => {
-    try {
+  const createFromTemplate = async () => {    try {
       const p = await api<SalesPage>("/sales-pages", { method: "POST", body: AI_BUSINESS_TEMPLATE });
       toast.success("Modelo criado. Personalize os dados e publique quando estiver pronto.");
       navigate(`/app/sales-pages/${p.id}`);
+    } catch (e: any) {
+      toast.error(e.message);
+    }
+  };
+
+  /** Cria uma página e já abre o editor na aba de upload do ZIP. */
+  const createAndOpenZipTab = async () => {
+    try {
+      const p = await api<SalesPage>("/sales-pages", {
+        method: "POST",
+        body: { title: "Minha página em ZIP" },
+      });
+      navigate(`/app/sales-pages/${p.id}?tab=site`);
     } catch (e: any) {
       toast.error(e.message);
     }
@@ -128,6 +140,7 @@ export default function SalesPagesListPage() {
         </div>
         <div className="flex gap-2 flex-wrap">
           <Button variant="outline" onClick={createFromTemplate}><Sparkles className="h-4 w-4 mr-2" /> Usar modelo IA para Empresários</Button>
+          <Button variant="outline" onClick={createAndOpenZipTab}><FileCode2 className="h-4 w-4 mr-2" /> Enviar minha página em ZIP</Button>
           <Button onClick={createEmpty} className="bg-gradient-primary shadow-glow"><Plus className="h-4 w-4 mr-2" /> Nova página</Button>
         </div>
       </div>

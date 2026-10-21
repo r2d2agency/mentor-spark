@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -11,7 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ImageUploadField } from "@/components/ImageUploadField";
-import { ArrowDown, ArrowLeft, ArrowUp, Sparkles, Loader2, Save, Plus, Trash2, ExternalLink, Copy, Rocket, FileCode2 } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Sparkles, Loader2, Save, Plus, Trash2, ExternalLink, Copy, Rocket, FileCode2, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { usePlanFeatures } from "@/hooks/usePlanFeatures";
@@ -112,6 +112,7 @@ type Provider = { id: string; type: string; label?: string; environment: string;
 
 export default function SalesPageEditorPage() {
   const { id } = useParams();
+  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { user } = useAuth();
   const { features } = usePlanFeatures();
@@ -121,6 +122,8 @@ export default function SalesPageEditorPage() {
   const [trails, setTrails] = useState<{ id: string; title: string }[]>([]);
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
+  // `?tab=site` abre direto no upload do ZIP (usado pelo atalho na listagem).
+  const [tab, setTab] = useState(searchParams.get("tab") || "ai");
 
   // AI form
   const [briefing, setBriefing] = useState("");
@@ -287,9 +290,11 @@ export default function SalesPageEditorPage() {
         </div>
       </div>
 
-      <Tabs defaultValue="ai" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="ai"><Sparkles className="h-3 w-3 mr-1" />Gerar com IA</TabsTrigger>
+      <Tabs value={tab} onValueChange={setTab} className="space-y-4">
+        {/* `flex-wrap`: com 9 abas a lista estourava a largura e a última
+            ("Página HTML (ZIP)") ficava fora da tela, sem rolagem. */}
+        <TabsList className="flex-wrap h-auto">
+          <TabsTrigger value="ai"><Sparkles class="h-3 w-3 mr-1" />Gerar com IA</TabsTrigger>
           <TabsTrigger value="design">Design</TabsTrigger>
           <TabsTrigger value="content">Conteúdo</TabsTrigger>
           {page.template === "long_form" && (
@@ -299,9 +304,7 @@ export default function SalesPageEditorPage() {
           <TabsTrigger value="upsell">Upsell pós-venda</TabsTrigger>
           <TabsTrigger value="faq">FAQ</TabsTrigger>
           <TabsTrigger value="checkout">Checkout</TabsTrigger>
-          {allowLandingBuilder && (
-            <TabsTrigger value="site"><FileCode2 className="h-3 w-3 mr-1" />Página HTML (ZIP)</TabsTrigger>
-          )}
+          <TabsTrigger value="site"><FileCode2 className="h-3 w-3 mr-1" />Página HTML (ZIP)</TabsTrigger>
         </TabsList>
 
         {/* ===== Design ===== */}
@@ -1309,11 +1312,23 @@ export default function SalesPageEditorPage() {
         </TabsContent>
 
         {/* ===== Página HTML (ZIP) ===== */}
-        {allowLandingBuilder && (
-          <TabsContent value="site">
+        <TabsContent value="site">
+          {allowLandingBuilder ? (
             <SiteZipTab pageId={page.id} />
-          </TabsContent>
-        )}
+          ) : (
+            <Card className="p-8 text-center space-y-3">
+              <Lock className="h-8 w-8 mx-auto text-muted-foreground" />
+              <h3 className="font-bold">Enviar minha página pronta em ZIP</h3>
+              <p className="text-sm text-muted-foreground max-w-lg mx-auto">
+                Suba sua página de vendas em HTML (com CSS, imagens e JS) e conecte apenas os botões
+                de checkout e cadastro. Disponível a partir do plano Starter.
+              </p>
+              <Button asChild>
+                <Link to="/app/billing"><Sparkles className="h-4 w-4 mr-2" />Ver planos</Link>
+              </Button>
+            </Card>
+          )}
+        </TabsContent>
       </Tabs>
     </div>
   );
