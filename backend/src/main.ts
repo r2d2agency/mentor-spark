@@ -53,6 +53,9 @@ async function bootstrap() {
   });
 
   app.setGlobalPrefix('api');
+  // Atrás do nginx, `req.protocol`/`req.ip` viram os do proxy sem isto —
+  // o throttler contaria o IP do proxy e a URL absoluta do site sairia "http://".
+  app.getHttpAdapter().getInstance().set('trust proxy', 1);
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true, forbidNonWhitelisted: false }));
 
   const config = new DocumentBuilder()

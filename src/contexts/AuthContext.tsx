@@ -278,6 +278,7 @@ const AuthContext = createContext<AuthContextValue | null>(null);
         .catch(() => {
           // Link inválido/expirado — remove o tk e segue o fluxo normal
           url.searchParams.delete("tk");
+          url.searchParams.delete("next");
           window.history.replaceState({}, "", url.toString());
           setToken(null);
         })
@@ -349,11 +350,15 @@ const AuthContext = createContext<AuthContextValue | null>(null);
     setToken(res.access_token);
     setUser(res.user);
     applyUserBrand(res.user);
-    // Remove o tk da URL sem recarregar a página
+    // Remove o tk da URL sem recarregar a página e respeita o destino pedido
+    // pelo backend (ex.: /me). Só aceitamos caminho interno.
     try {
       const url = new URL(window.location.href);
       url.searchParams.delete("tk");
-      window.history.replaceState({}, "", url.toString());
+      const next = url.searchParams.get("next");
+      url.searchParams.delete("next");
+      const target = next && next.startsWith("/") && !next.startsWith("//") ? next : url.pathname;
+      window.history.replaceState({}, "", `${target}${url.search}${url.hash}`);
     } catch { /* noop */ }
     if (res.user.role === "prospect" || res.user.role === "mentorado" || res.user.role === "mentor_team") {
       await refreshUser();
@@ -376,7 +381,7 @@ export function useAuth() {
 
 interface AuthContextValue {
   user: SessionUser | null;
-  staffMentor: StaffMentor | null;
+  staffMentor: SessionUser | null;
   loading: boolean;
   login: (email: string, password: string) => Promise<SessionUser>;
   logout: () => void;

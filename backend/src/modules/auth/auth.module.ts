@@ -22,6 +22,6 @@ import { IntegrationsModule } from '../integrations/integrations.module';
   ],
   providers: [AuthService, JwtStrategy, MailService],
   controllers: [AuthController],
-  exports: [AuthService, JwtModule],
+  exports: [AuthService, JwtModule, MailService],
 })
 export class AuthModule {}

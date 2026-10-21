@@ -11,9 +11,11 @@ import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ImageUploadField } from "@/components/ImageUploadField";
-import { ArrowDown, ArrowLeft, ArrowUp, Sparkles, Loader2, Save, Plus, Trash2, ExternalLink, Copy, Rocket } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Sparkles, Loader2, Save, Plus, Trash2, ExternalLink, Copy, Rocket, FileCode2 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
+import { usePlanFeatures } from "@/hooks/usePlanFeatures";
+import SiteZipTab from "@/components/sales/SiteZipTab";
 
 type Feature = { icon?: string; title: string; text?: string };
 type Faq = { q: string; a: string };
@@ -112,6 +114,8 @@ export default function SalesPageEditorPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const { features } = usePlanFeatures();
+  const allowLandingBuilder = features.allowLandingBuilder !== false;
   const [page, setPage] = useState<SalesPage | null>(null);
   const [providers, setProviders] = useState<Provider[]>([]);
   const [trails, setTrails] = useState<{ id: string; title: string }[]>([]);
@@ -295,6 +299,9 @@ export default function SalesPageEditorPage() {
           <TabsTrigger value="upsell">Upsell pós-venda</TabsTrigger>
           <TabsTrigger value="faq">FAQ</TabsTrigger>
           <TabsTrigger value="checkout">Checkout</TabsTrigger>
+          {allowLandingBuilder && (
+            <TabsTrigger value="site"><FileCode2 className="h-3 w-3 mr-1" />Página HTML (ZIP)</TabsTrigger>
+          )}
         </TabsList>
 
         {/* ===== Design ===== */}
@@ -1300,6 +1307,13 @@ export default function SalesPageEditorPage() {
             </div>
           </Card>
         </TabsContent>
+
+        {/* ===== Página HTML (ZIP) ===== */}
+        {allowLandingBuilder && (
+          <TabsContent value="site">
+            <SiteZipTab pageId={page.id} />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

@@ -1,8 +1,21 @@
 import { Body, Controller, Delete, Get, Param, Post, Put } from '@nestjs/common';
+import { IsEmail, IsOptional, IsString, MaxLength, MinLength } from 'class-validator';
+import { Throttle } from '@nestjs/throttler';
 import { Auth } from '../auth/auth.decorators';
 import { TenantId } from '../auth/current-user.decorator';
 import { SalesPagesService } from './sales-pages.service';
 import { SalesPageProductType } from '../../entities/sales-page.entity';
+
+class SalesPageSignupDto {
+  @IsString() @MinLength(2) @MaxLength(120) name: string;
+  @IsEmail() email: string;
+  @IsOptional() @IsString() @MaxLength(40) phone?: string;
+  @IsOptional() @IsString() @MaxLength(120) company?: string;
+  @IsOptional() @IsString() @MaxLength(120) revenue?: string;
+  @IsOptional() @IsString() @MinLength(8) @MaxLength(72) password?: string;
+  /** Chave de idempotência — evita lead duplicado em duplo clique. */
+  @IsOptional() @IsString() @MaxLength(64) requestId?: string;
+}
 
 @Controller('sales-pages')
 export class SalesPagesController {
@@ -110,5 +123,20 @@ export class PublicSalesPagesController {
   @Post('access/redeem')
   redeemAccessLink(@Body() dto: { token: string }) {
     return this.svc.redeemAccessLink(dto?.token);
+  }
+
+  /**
+   * Cadastro público vindo da página (inclusive a página HTML enviada em ZIP).
+   * Cria o lead/usuário e devolve o destino configurado pelo mentor:
+   * link de acesso à área interna, link externo ou página de "obrigado".
+   */
+  @Throttle({ default: { limit: 10, ttl: 60000 } })
+  @Post(':mentorSlug/:pageSlug/signup')
+  signup(
+    @Param('mentorSlug') mentorSlug: string,
+    @Param('pageSlug') pageSlug: string,
+    @Body() dto: SalesPageSignupDto,
+  ) {
+    return this.svc.signup(mentorSlug, pageSlug, dto);
   }
 }

@@ -30,6 +30,13 @@ services:
       DB_HOST: postgres
     ports:
       - "3001:3001"
+    volumes:
+      # Sites em ZIP enviados pelos mentores e arquivos de upload.
+      # Sem volume, tudo se perde a cada redeploy.
+      - mentorflow_sites:/app/sites
+      - mentorflow_uploads:/app/uploads
 
 volumes:
   mentorflow_pgdata:
+  mentorflow_sites:
+  mentorflow_uploads:

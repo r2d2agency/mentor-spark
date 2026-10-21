@@ -35,11 +35,19 @@ export class PurchaseLinksService {
     return this.config.get<string>('PURCHASE_LINK_EXPIRES_IN', '1d');
   }
 
-  /** Monta a URL pública da área de memória para o mentor. */
-  private accessUrl(mentorSlug?: string): string {
+  /** Monta a URL pública da área do mentorado. */
+  private accessUrl(): string {
     const base = this.config.get<string>('PUBLIC_APP_URL', 'http://localhost:5173').replace(/\/$/, '');
-    const suffix = mentorSlug ? `?next=${encodeURIComponent(`/${mentorSlug}/me`)}` : '';
-    return `${base}/me${suffix}`;
+    return `${base}/me`;
+  }
+
+  /**
+   * Redirecionamento interno após o login via link de compra.
+   * A área do mentorado vive em `/me` — não existe rota `/:mentorSlug/me`
+   * no app, então o slug do mentor não altera o caminho.
+   */
+  private nextPath(): string {
+    return '/me';
   }
 
   async issue(params: { mentorId: string; mentorSlug?: string; leadId?: string; email?: string }) {
@@ -56,7 +64,8 @@ export class PurchaseLinksService {
     };
 
     const token = await this.jwt.signAsync(payload, { expiresIn: this.expiresIn });
-    return { token, url: `${this.accessUrl(params.mentorSlug)}?tk=${token}` };
+    const next = encodeURIComponent(this.nextPath());
+    return { token, url: `${this.accessUrl()}?tk=${token}&next=${next}` };
   }
 
   /**

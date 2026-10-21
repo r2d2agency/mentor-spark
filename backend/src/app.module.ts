@@ -46,6 +46,7 @@ import { AccessGroupsModule } from './modules/access-groups/access-groups.module
 import { TrailAccessModule } from './modules/trail-access/trail-access.module';
 import { CalendarModule } from './modules/calendar/calendar.module';
 import { SalesPagesModule } from './modules/sales-pages/sales-pages.module';
+import { SitesModule } from './modules/sites/sites.module';
 import { ServeStaticModule } from '@nestjs/serve-static';
 import { join } from 'path';
 import { buildPgOptions } from './db.config';
@@ -104,6 +105,7 @@ import { buildPgOptions } from './db.config';
     TrailAccessModule,
     CalendarModule,
     SalesPagesModule,
+    SitesModule,
     ServeStaticModule.forRoot({
       rootPath: join(process.cwd(), 'uploads'),
       serveRoot: '/uploads',

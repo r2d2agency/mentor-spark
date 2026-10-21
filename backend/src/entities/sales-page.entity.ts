@@ -113,6 +113,40 @@ export interface SalesPageTheme {
 
 export type SalesPageTemplate = 'classic' | 'long_form';
 
+/** Arquivo extraído do ZIP da página (metadados — nunca caminho absoluto). */
+export interface SalesPageSiteFile {
+  /** Caminho relativo à raiz extraída, sempre com `/`. */
+  path: string;
+  size: number;
+}
+
+/**
+ * Configuração da "página HTML pronta" (upload de ZIP).
+ *
+ * A página do mentor é servida em iframe com `sandbox` (sem `allow-same-origin`),
+ * de forma isolada da origem do app. Os botões dela são ligados à plataforma pelo
+ * atributo `data-mf` (ver `modules/sites/bridge.ts`).
+ */
+export interface SalesPageSiteConfig {
+  /** Quando true, o layout nativo é substituído pelo iframe do site. */
+  enabled: boolean;
+  /** Token público (uuid v4) do site. Server-owned — nunca aceito do cliente. */
+  siteToken: string | null;
+  /** Arquivo de entrada, relativo à raiz extraída (ex.: 'index.html'). */
+  entry: string | null;
+  /** Lista de arquivos extraídos. NUNCA exposta no payload público. */
+  files: SalesPageSiteFile[];
+  uploadedAt: string | null;
+  /** Destino após o cadastro: área interna, link externo ou página de obrigado. */
+  successType: 'internal' | 'url' | 'file';
+  /** Link externo (apenas em successType='url'). */
+  successUrl: string | null;
+  /** Página de "obrigado" do próprio ZIP (apenas em successType='file'). */
+  successFile: string | null;
+  /** Evento (slug) usado pela ação `data-mf="event"`. */
+  eventSlug: string | null;
+}
+
 export type SalesPageBlockType = 'hero' | 'text' | 'features' | 'faq' | 'cta' | 'testimonial' | 'section';
 
 export interface SalesPageBlock {
@@ -297,6 +331,11 @@ export class SalesPage {
   /** Mostrar o card de upsell apenas N minutos após a compra (0 = imediato). */
   @Column({ type: 'int', default: 0 })
   upsellDelayMinutes?: number;
+
+  // ---- Página HTML pronta (upload de ZIP) ----
+  /** Metadados do site estático enviado pelo mentor (modo alternativo de render). */
+  @Column({ type: 'jsonb', nullable: true })
+  siteConfig?: SalesPageSiteConfig;
 
   @CreateDateColumn()
   createdAt: Date;

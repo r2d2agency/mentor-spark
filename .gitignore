@@ -12,6 +12,15 @@ dist
 dist-ssr
 *.local
 
+# Arquivos enviados pelo usuário (página HTML em ZIP, imagens de upload)
+# ficam fora do versionamento — são dados de runtime, não código.
+# Ancorado na raiz: sem isso, `sites/` casaria com `backend/src/modules/sites/`
+# e o módulo inteiro ficaria fora do versionamento.
+/sites/
+/uploads/
+/backend/sites/
+/backend/uploads/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -237,7 +237,12 @@ export class SalesPagesService {
       seo: source.seo ? structuredClone(source.seo) : source.seo,
     });
 
-    return this.pages.save(copy);
+    const saved = await this.pages.save(copy);
+
+    // A página duplicada começa sem site: o `siteToken` é server-owned e os
+    // arquivos em disco pertencem à página original. O mentor reenvia o ZIP
+    // (o editor mostra que a cópia ainda não tem site).
+    return saved;
   }
 
   async update(mentorId: string, id: string, dto: Partial<SalesPage>) {
@@ -265,6 +270,12 @@ export class SalesPagesService {
   async remove(mentorId: string, id: string) {
     await this.get(mentorId, id);
     await this.pages.delete({ id, mentorId } as any);
+    // Limpa os arquivos do site (fora de `uploads/`).
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      fs.rmSync(path.resolve(process.cwd(), 'sites', id), { recursive: true, force: true });
+    } catch {}
     return { ok: true };
   }
 
@@ -413,6 +424,20 @@ Gere o JSON agora.`;
     // Não exporta a lista completa de cupons publicamente (usuário digita o código).
     const publicPage: any = { ...p };
     delete publicPage.coupons;
+    // O site enviado pelo mentor: expõe só o necessário para o iframe e o
+    // roteamento pós-cadastro. A lista de arquivos NUNCA sai daqui.
+    if (publicPage.siteConfig) {
+      const sc = publicPage.siteConfig;
+      publicPage.siteConfig = {
+        enabled: !!sc.enabled,
+        siteToken: sc.siteToken || null,
+        entry: sc.entry || null,
+        successType: sc.successType || 'internal',
+        successUrl: sc.successUrl || null,
+        successFile: sc.successFile || null,
+        eventSlug: sc.eventSlug || null,
+      };
+    }
     return {
       mentor: {
         id: m.id,
@@ -612,8 +637,13 @@ Gere o JSON agora.`;
       }
       chargePayload.installmentCount = Math.max(1, Math.min(dto.installments || 1, page.maxInstallments));
       if (chargePayload.installmentCount > 1) {
+        // No /payments o `value` é o TOTAL da compra e o Asaas divide em
+        // `installmentCount` parcelas. `totalValue` explicita o total para
+        // installations que não fecham exatamente (centavo da última parcela).
+        // O endpoint /installments NÃO é usado aqui: ele exige o valor de CADA
+        // parcela em `value` e devolve um id de parcelamento que não casa com
+        // o `payment.id` enviado no webhook.
         chargePayload.totalValue = value;
-        delete chargePayload.value;
       }
       chargePayload.creditCard = {
         holderName: dto.creditCard.holderName,
@@ -632,9 +662,7 @@ Gere o JSON agora.`;
       };
     }
 
-    const endpoint = dto.billingType === 'CREDIT_CARD' && (chargePayload.installmentCount || 1) > 1
-      ? '/installments'
-      : '/payments';
+    const endpoint = '/payments';
 
     const charge = await fetch(`${baseUrl}${endpoint}`, {
       method: 'POST',
@@ -743,14 +771,10 @@ Gere o JSON agora.`;
       }
     }
 
-    // Link de uso único para o comprador cair direto na área de acesso assim que
-    // o pagamento for confirmado — sem depender do e-mail com as credenciais.
-    const access = await this.purchaseLinks.issue({
-      mentorId: mentor.id,
-      mentorSlug: mentor.slug,
-      leadId: leadId || undefined,
-      email: dto.email,
-    });
+    // O link de uso único (para o comprador cair na área interna) NÃO é emitido
+    // aqui: ele é devolvido por `chargeStatus()` apenas quando a cobrança está
+    // PAGA. Emitir no checkout colocaria a URL `/me?tk=...` na resposta da API,
+    // dando acesso de PROSPECT à área interna sem pagar.
 
     return {
       ok: true,
@@ -764,7 +788,7 @@ Gere o JSON agora.`;
       invoiceUrl: charge.invoiceUrl || null,
       bankSlipUrl: charge.bankSlipUrl || null,
       pix,
-      accessUrl: access.url,
+      accessUrl: null as string | null,
       trailId: page.productRefId || null,
       trailAccessGranted: false,
       upsell: page.upsellTrailId && page.upsellPriceCents && page.upsellPriceCents >= 100
@@ -924,13 +948,109 @@ Gere o JSON agora.`;
     if (meta.salesPageSlug && meta.salesPageSlug !== pageSlug) {
       throw new NotFoundException('Cobrança não encontrada');
     }
+    const isPaid = String(charge.status || '').toUpperCase() === 'PAID'
+      || String(charge.status || '').toUpperCase() === 'RECEIVED'
+      || String(charge.status || '').toUpperCase() === 'CONFIRMED';
+
+    // O link de acesso só é emitido **depois** do pagamento — emitindo no
+    // checkout, a URL `/me?tk=...` ficaria na resposta da API e daria acesso
+    // de PROSPECT à área interna sem pagar.
+    let accessUrl: string | null = null;
+    if (isPaid) {
+      const leadId = (charge.metadata as any)?.leadId || charge.leadId || null;
+      try {
+        const link = await this.purchaseLinks.issue({
+          mentorId: mentor.id,
+          mentorSlug: mentor.slug,
+          leadId: leadId || undefined,
+        });
+        accessUrl = link.url;
+      } catch (e) {
+        this.logger.warn(`Não foi possível emitir link de acesso da charge ${charge.id}: ${e?.message}`);
+      }
+    }
+
     return {
       chargeId: charge.id,
       asaasChargeId: charge.asaasChargeId,
-      status: charge.status,
+      // Status no padrão do Asaas (maiúsculo) — o front compara com 'PAID'.
+      status: String(charge.status || '').toUpperCase(),
+      rawStatus: charge.status,
       paidAt: charge.paidAt,
       trailId: (charge.metadata as any)?.trailId || null,
+      accessUrl,
     };
+  }
+
+  /**
+   * Cadastro público vindo da página em ZIP (ou de qualquer página de vendas).
+   *
+   * Cria o lead/usuário PROSPECT e devolve o destino configurado pelo mentor:
+   *  - `internal` → link de acesso para a área interna (`/me?tk=...`);
+   *  - `url`     → link externo definido pelo mentor;
+   *  - `file`    → página de "obrigado" dentro do próprio site.
+   */
+  async signup(mentorSlug: string, pageSlug: string, dto: {
+    name: string; email: string; phone?: string; company?: string;
+    revenue?: string; password?: string; requestId?: string;
+  }) {
+    const mentor = await this.users.findOne({ where: { slug: mentorSlug, status: UserStatus.ACTIVE } });
+    if (!mentor) throw new NotFoundException('Mentor não encontrado');
+    const page = await this.pages.findOne({ where: { mentorId: mentor.id, slug: pageSlug, published: true } });
+    if (!page) throw new NotFoundException('Página não encontrada ou não publicada');
+
+    const name = String(dto.name || '').trim();
+    const email = String(dto.email || '').trim().toLowerCase();
+    if (name.length < 2) throw new BadRequestException('Informe o nome completo.');
+    if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      throw new BadRequestException('Informe um e-mail válido.');
+    }
+    if (dto.password && dto.password.length < 8) {
+      throw new BadRequestException('A senha deve ter no mínimo 8 caracteres.');
+    }
+
+    // Best-effort: a captura do lead não pode derrubar o fluxo de cadastro.
+    let leadId: string | null = null;
+    let accessUrl: string | null = null;
+    try {
+      const result = await this.leadsService.createFromCapture({
+        mentorId: mentor.id,
+        mentorBrand: mentor.brandName || mentor.name,
+        name,
+        email,
+        phone: dto.phone,
+        company: dto.company,
+        revenue: dto.revenue ? Number(String(dto.revenue).replace(/\D/g, '')) || undefined : undefined,
+        source: `sales:${page.slug}`,
+        salesPageId: page.id,
+        salesPageSlug: page.slug,
+        password: dto.password,
+      });
+      leadId = result.lead.id;
+    } catch (e: any) {
+      this.logger.warn(`Falha ao capturar lead do cadastro público: ${e?.message}`);
+    }
+
+    const successType = page.siteConfig?.successType || 'internal';
+
+    if (successType === 'internal') {
+      if (leadId) {
+        try {
+          const link = await this.purchaseLinks.issue({ mentorId: mentor.id, mentorSlug: mentor.slug, leadId });
+          accessUrl = link.url;
+        } catch (e) {
+          this.logger.warn(`Não foi possível emitir link de acesso: ${e?.message}`);
+        }
+      }
+      return { ok: true, leadId, accessUrl, successType };
+    }
+
+    if (successType === 'url') {
+      // Não expõe o accessUrl: o mentor escolheu um destino externo.
+      return { ok: true, leadId, redirectUrl: page.siteConfig?.successUrl || null, successType };
+    }
+
+    return { ok: true, leadId, successFile: page.siteConfig?.successFile || null, successType };
   }
 
   /**
