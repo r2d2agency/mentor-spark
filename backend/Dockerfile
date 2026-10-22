@@ -42,7 +42,8 @@ RUN if [ -f /tmp/context/backend/package.json ]; then \
  && cd /app \
  && rm -rf node_modules dist sites uploads \
  && find . -name '*.tsbuildinfo' -delete \
- && npm install --no-audit --no-fund \
+ && npm install --include=dev --no-audit --no-fund \
+ && test -x node_modules/.bin/nest \
  && npm run build \
  && find . -name '*.tsbuildinfo' -delete \
  && test -f dist/main.js \
