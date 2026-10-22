@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger, INestApplication } from '@nestjs/common';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { TenantOriginsService } from './modules/public/tenant-origins.service';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { IoAdapter } from '@nestjs/platform-socket.io';
 import * as http from 'http';
@@ -101,6 +102,16 @@ async function bootstrap() {
   app.useWebSocketAdapter(new IoAdapter(app));
   app.use(helmet({ crossOriginResourcePolicy: false, crossOriginOpenerPolicy: false }));
 
+  // Domínios próprios dos tenants: lidos do banco para que o CORS libere a
+  // origem sem precisar de redeploy a cada tenant novo.
+  let tenantOrigins: TenantOriginsService | undefined;
+  try {
+    tenantOrigins = app.get(TenantOriginsService, { strict: false });
+  } catch {
+    // Sem o serviço (ex.: AppModule sem o PublicModule) o CORS funciona
+    // só com a allowlist estática — não é motivo para derrubar o boot.
+  }
+
   // CORS robusto: aceita lista CSV (CORS_ORIGIN), libera *.easypanel.host, localhost
   // e (opcionalmente) qualquer origem extra via CORS_ALLOW_ALL=true.
   const allowList = (process.env.CORS_ORIGIN || 'http://localhost:8080,http://localhost:5173')
@@ -125,6 +136,11 @@ async function bootstrap() {
           if (host === eh || host.endsWith('.' + eh)) return true;
         } catch {}
       }
+      // Domínio próprio de tenant (users.customDomain). Sem isto, o frontend
+      // de um tenant com domínio custom (ex.: app.alemdolucro.org) recebe
+      // "blocked by CORS policy" em TODA chamada — inclusive o login —
+      // porque a origem não está na allowlist estática.
+      if (tenantOrigins?.isTenantHost(host)) return true;
     } catch {}
     return false;
   };
